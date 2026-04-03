@@ -277,7 +277,7 @@ async function renderAdmin() {
                     ${doc.length ? doc.map(d => {
                         const estado = d.estado || 'active';
                         const estadoColor = estado === 'active' ? 'bg-green-100 text-green-700' : estado === 'revision' ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-700';
-                        const estadoLabel = estado === 'active' ? 'Activo' : estado === 'revision' ? 'En revisión' : 'Baneado';
+                        const estadoLabel = estado === 'active' ? 'Activo' : estado === 'revision' ? 'En revisión' : 'Eliminado';
                         return `<div class="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
                             <div class="flex items-center gap-3">
                                 <span class="px-2 py-1 rounded text-xs font-bold ${estadoColor}">${estadoLabel}</span>
@@ -287,9 +287,11 @@ async function renderAdmin() {
                                 </div>
                             </div>
                             <div class="flex gap-2">
-                                <button onclick="setUserStatus('${d.id}', 'revision')" class="bg-yellow-500 text-white px-3 py-1 rounded text-xs" title="Poner en revisión">⚠️</button>
-                                <button onclick="setUserStatus('${d.id}', 'banned')" class="bg-red-600 text-white px-3 py-1 rounded text-xs" title="Banear">🚫</button>
-                                <button onclick="setUserStatus('${d.id}', 'active')" class="bg-green-600 text-white px-3 py-1 rounded text-xs" title="Activar">✓</button>
+                                ${estado !== 'deleted' ? `
+                                    <button onclick="setUserStatus('${d.id}', 'revision')" class="bg-yellow-500 text-white px-3 py-1 rounded text-xs" title="Poner en revisión">⚠️</button>
+                                    <button onclick="confirmarEliminarMaestro('${d.id}', '${d.nombre}')" class="bg-red-600 text-white px-3 py-1 rounded text-xs" title="Eliminar cuenta">🗑️</button>
+                                    <button onclick="setUserStatus('${d.id}', 'active')" class="bg-green-600 text-white px-3 py-1 rounded text-xs" title="Activar">✓</button>
+                                ` : ''}
                             </div>
                         </div>`;
                     }).join('') : '<p class="text-slate-500">No hay maestros</p>'}
@@ -389,6 +391,18 @@ function initAdminCharts(estPorGrado, asigPorTipo, entPorMes) {
 async function setUserStatus(userId, status) {
     await API.patch('docentes', userId, { estado: status });
     alert('Estado actualizado: ' + status);
+    render();
+}
+
+function confirmarEliminarMaestro(id, nombre) {
+    if (confirm(`¿Estás seguro de eliminar la cuenta de "${nombre}"?\n\nSus tareas y datos históricos se mantendrán.`)) {
+        eliminarMaestro(id);
+    }
+}
+
+async function eliminarMaestro(id) {
+    await API.patch('docentes', id, { estado: 'deleted' });
+    alert('Cuenta eliminada. Los datos históricos se preservan.');
     render();
 }
 
