@@ -14,13 +14,18 @@
     
     <script>
         // ==================== CONFIGURACIÓN ====================
+        // Configurar estas variables en producción:
+        // - window.EDUCIENCIAS_CONFIG.d1ApiUrl: URL del Cloudflare Worker
+        // - window.EDUCIENCIAS_CONFIG.hfToken: Token de HuggingFace (opcional para IA)
+        // 
+        // Para GitHub Pages: agregar en index.html o configurar via CI/CD
         window.EDUCIENCIAS_CONFIG = {
-            // URL de tu Cloudflare Worker (D1)
-            d1ApiUrl: 'https://tu-worker.tu-usuario.workers.dev',
-            d1ApiKey: 'TU_D1_API_KEY',
+            // URL del Cloudflare Worker (cambiar en producción)
+            d1ApiUrl: window.D1_API_URL || 'https://tu-worker.tu-subdomain.workers.dev',
+            d1ApiKey: window.D1_API_KEY || 'dev-token',
             
-            // Token de HuggingFace para Inference API
-            hfToken: 'TU_HF_TOKEN',
+            // Token de HuggingFace para Inference API (gratis)
+            hfToken: window.HF_TOKEN || '',
             hfModel: 'meta-llama/Llama-3.1-8B-Instruct'
         };
     </script>
@@ -30,98 +35,56 @@
 
     <script>
     // ============================================
-    // CLOUDFLARE D1 CLIENT (via Worker API)
+    // CLOUDFLARE WORKER API CLIENT
     // ============================================
-    const DB = {
+    const API = {
         url: window.EDUCIENCIAS_CONFIG.d1ApiUrl,
         key: window.EDUCIENCIAS_CONFIG.d1ApiKey,
         
-        async query(sql, params = []) {
-            const resp = await fetch(this.url, {
-                method: 'POST',
-                headers: {
-                    'Authorization': `Bearer ${this.key}`,
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({ sql, params })
-            });
-            if (!resp.ok) { console.error('DB Error:', await resp.text()); return []; }
+        async request(endpoint, options = {}) {
+            const headers = {
+                'Authorization': `Bearer ${this.key}`,
+                'Content-Type': 'application/json'
+            };
+            
+            const url = `${this.url}${endpoint}`;
+            let resp;
+            
+            if (options.method === 'POST') {
+                resp = await fetch(url, { method: 'POST', headers, body: JSON.stringify(options.body) });
+            } else if (options.method === 'PATCH') {
+                resp = await fetch(url + '/' + options.id, { method: 'PATCH', headers, body: JSON.stringify(options.body) });
+            } else if (options.method === 'DELETE') {
+                resp = await fetch(url + '/' + options.id, { method: 'DELETE', headers });
+            } else {
+                resp = await fetch(url, { headers });
+            }
+            
+            if (!resp.ok) { console.error('API Error:', await resp.text()); return options.isArray !== false ? [] : null; }
             const data = await resp.json();
-            return data.results || [];
+            return data;
         },
         
-        async get(table, where = '', order = '') {
-            const sql = where ? `SELECT * FROM ${table} WHERE ${where}` : `SELECT * FROM ${table}`;
-            const fullSql = order ? sql + ` ORDER BY ${order}` : sql;
-            return this.query(fullSql);
-        },
-        
-        async insert(table, data) {
-            const cols = Object.keys(data).join(', ');
-            const vals = Object.values(data).map(v => typeof v === 'string' ? `'${v}'` : v).join(', ');
-            return this.query(`INSERT INTO ${table} (${cols}) VALUES (${vals})`);
-        },
-        
-        async update(table, id, data) {
-            const set = Object.entries(data).map(([k, v]) => `${k} = ${typeof v === 'string' ? "'" + v + "'" : v}`).join(', ');
-            return this.query(`UPDATE ${table} SET ${set} WHERE id = '${id}'`);
-        },
-        
-        async delete(table, id) {
-            return this.query(`DELETE FROM ${table} WHERE id = '${id}'`);
-        }
+        // Shortcuts
+        async get(table, isArray = true) { return this.request(`/${table}`); },
+        async getBy(table, filter, isArray = true) { return this.request(`/${table}?${filter}`); },
+        async post(table, data) { return this.request(`/${table}`, { method: 'POST', body: data }); },
+        async patch(table, id, data) { return this.request(`/${table}`, { method: 'PATCH', id, body: data }); },
+        async delete(table, id) { return this.request(`/${table}`, { method: 'DELETE', id }); }
     };
 
     // ============================================
-    // AUTH (basado en tabla perfiles)
+    // AUTH (via Worker API)
     // ============================================
     const AUTH = {
         async login(email, password) {
-            const results = await DB.query("SELECT * FROM perfiles WHERE email = ? AND password = ?", [email, password]);
-            if (results[0]) {
-                const user = results[0];
-                // Cargar datos según rol
-                if (user.rol === 'docente') {
-                    const docs = await DB.get('docentes', `user_id = '${user.id}'`);
-                    if (docs[0]) {
-                        user.docenteId = docs[0].id;
-                        user.escuela = docs[0].escuela;
-                        user.grados = JSON.parse(docs[0].grados || '[]');
-                    }
-                } else if (user.rol === 'estudiante') {
-                    const ests = await DB.get('estudiantes', `user_id = '${user.id}'`);
-                    if (ests[0]) {
-                        user.estudianteId = ests[0].id;
-                        user.grado = ests[0].grado;
-                    }
-                }
-            }
-            return results[0] || null;
+            const result = await API.request('/auth/login', { method: 'POST', body: { email, password } });
+            return result?.user || null;
         },
         
         async register(email, password, nombre, rol, extras = {}) {
-            const id = 'user_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
-            await DB.insert('perfiles', { id, email, password, rol, nombre });
-            
-            if (rol === 'docente') {
-                await DB.insert('docentes', { 
-                    id: 'doc_' + Date.now(), 
-                    user_id: id, 
-                    nombre, 
-                    escuela: extras.escuela || '', 
-                    grados: JSON.stringify(extras.grados || []),
-                    razon: extras.razon || ''
-                });
-            } else if (rol === 'estudiante') {
-                await DB.insert('estudiantes', {
-                    id: 'est_' + Date.now(),
-                    user_id: id,
-                    nombre,
-                    grado: extras.grado || '',
-                    maestro_id: extras.maestro_id || ''
-                });
-            }
-            return { id, email, rol, nombre };
+            const result = await API.request('/auth/register', { method: 'POST', body: { email, password, nombre, rol, ...extras } });
+            return result?.user;
         },
         
         save(user) { localStorage.setItem('edu_user', JSON.stringify(user)); },
@@ -281,8 +244,8 @@
     // ============================================
     async function re() {
         const f = FRASES[Math.floor(Math.random()*FRASES.length)];
-        const asig = await DB.get('asignaciones', `grado = '${state.user?.grado}' AND activa = 1`);
-        const ent = await DB.get('entregas', `estudiante_id = '${state.user?.estudianteId}'`);
+        const asig = await API.get('asignaciones', `grado = '${state.user?.grado}' AND activa = 1`);
+        const ent = await API.get('entregas', `estudiante_id = '${state.user?.estudianteId}'`);
         const calif = ent.filter(e => e.calificacion);
         const prom = calif.length ? Math.round(calif.reduce((a,b)=>a+b.calificacion,0)/calif.length) : 0;
         return `<div class="space-y-6">
@@ -308,7 +271,7 @@
     async function ent(aid, tit) {
         const c = prompt('Tu respuesta:');
         if (!c) return;
-        await DB.insert('entregas', {id:'ent_'+Date.now(),estudiante_id:state.user.estudianteId,asignacion_id:aid,contenido:c,fecha_entrega:new Date().toISOString()});
+        await API.insert('entregas', {id:'ent_'+Date.now(),estudiante_id:state.user.estudianteId,asignacion_id:aid,contenido:c,fecha_entrega:new Date().toISOString()});
         alert('¡Entregada!'); render();
     }
 
@@ -324,7 +287,7 @@
     }
 
     async function envLab(id) {
-        await DB.insert('entregas', {id:'ent_'+Date.now(),estudiante_id:state.user.estudianteId,asignacion_id:id,cuaderno:JSON.stringify({h:document.getElementById('lh').value,m:document.getElementById('lm').value,o:document.getElementById('lo').value,c:document.getElementById('lc').value}),tipo:'laboratorio',fecha_entrega:new Date().toISOString()});
+        await API.insert('entregas', {id:'ent_'+Date.now(),estudiante_id:state.user.estudianteId,asignacion_id:id,cuaderno:JSON.stringify({h:document.getElementById('lh').value,m:document.getElementById('lm').value,o:document.getElementById('lo').value,c:document.getElementById('lc').value}),tipo:'laboratorio',fecha_entrega:new Date().toISOString()});
         document.querySelector('.fixed')?.remove(); alert('¡Entregado!'); render();
     }
 
@@ -366,7 +329,7 @@
     }
 
     async function rMeta() {
-        const ent = await DB.get('metacognicion', `estudiante_id = '${state.user?.estudianteId}'`, 'fecha DESC');
+        const ent = await API.get('metacognicion', `estudiante_id = '${state.user?.estudianteId}'`, 'fecha DESC');
         return `<div class="bg-teal-50 rounded-2xl p-6 border-2 border-teal-200">
             <h3 class="text-xl font-black text-teal-900 mb-4"><i class="fas fa-book-open mr-2"></i>Diario Científico</h3>
             <div class="space-y-4 mb-8">
@@ -383,7 +346,7 @@
     async function guardarM() {
         const a = document.getElementById('ma').value, d = document.getElementById('md').value, p = document.getElementById('mp').value;
         if (!a || !d) return alert('Completa los campos');
-        await DB.insert('metacognicion', {id:'meta_'+Date.now(),estudiante_id:state.user.estudianteId,aprendi:a,dificultad:d,nueva_pregunta:p,fecha:new Date().toISOString().split('T')[0]});
+        await API.insert('metacognicion', {id:'meta_'+Date.now(),estudiante_id:state.user.estudianteId,aprendi:a,dificultad:d,nueva_pregunta:p,fecha:new Date().toISOString().split('T')[0]});
         alert('¡Guardado!'); render();
     }
 
@@ -397,7 +360,7 @@
 
     async function buscarB() {
         const q = document.getElementById('bs').value; if (!q) return;
-        let res = await DB.get('biodiversidad', `nombre LIKE '%${q}%'`);
+        let res = await API.get('biodiversidad', `nombre LIKE '%${q}%'`);
         if (!res.length) res = [await HF.buscarBiodiversidad(q)];
         document.getElementById('br').innerHTML = res.map(i=>`<div class="bg-white rounded-xl p-4 border border-green-100"><h4 class="font-bold text-green-800">${i.nombre}</h4><p class="text-sm mt-2">${i.descripcion}</p></div>`).join('')||'<p>Sin resultados</p>';
     }
@@ -406,9 +369,9 @@
     // VISTAS DOCENTE
     // ============================================
     async function rd() {
-        const est = await DB.get('estudiantes', `maestro_id = '${state.user?.docenteId}'`);
-        const asig = await DB.get('asignaciones', `maestro_id = '${state.user?.docenteId}'`);
-        const sug = await DB.get('sugerencias', `maestro_id = '${state.user?.docenteId}'`, 'fecha DESC LIMIT 5');
+        const est = await API.get('estudiantes', `maestro_id = '${state.user?.docenteId}'`);
+        const asig = await API.get('asignaciones', `maestro_id = '${state.user?.docenteId}'`);
+        const sug = await API.get('sugerencias', `maestro_id = '${state.user?.docenteId}'`, 'fecha DESC LIMIT 5');
         return `<div class="space-y-6">
             <div class="bg-slate-800 rounded-3xl p-8 text-white"><h3 class="text-2xl font-black"><i class="fas fa-calendar-alt mr-2"></i>Panel</h3><p class="text-slate-300">Escuela: ${state.user?.escuela}</p></div>
             <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -422,12 +385,12 @@
 
     async function envS() {
         const t = document.getElementById('si').value; if (!t) return;
-        await DB.insert('sugerencias', {id:'sug_'+Date.now(),maestro_id:state.user.docenteId,texto:t,fecha:new Date().toISOString()});
+        await API.insert('sugerencias', {id:'sug_'+Date.now(),maestro_id:state.user.docenteId,texto:t,fecha:new Date().toISOString()});
         document.getElementById('si').value = ''; alert('Enviada');
     }
 
     async function rEst() {
-        const est = await DB.get('estudiantes', `maestro_id = '${state.user?.docenteId}'`);
+        const est = await API.get('estudiantes', `maestro_id = '${state.user?.docenteId}'`);
         return `<div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
             <div class="bg-white rounded-2xl p-6 border"><h3 class="text-xl font-bold mb-4">Agregar Estudiante</h3>
                 <div class="space-y-4"><input type="text" id="nsn" placeholder="Nombres" class="w-full p-3 rounded-xl border">
@@ -444,15 +407,15 @@
         const u = n.toLowerCase().replace(/[^a-z]/g,'').substring(0,8);
         const e = `${u}@estudiante.educiencias.com`, p = Math.random().toString(36).substring(2,8);
         const uid = 'est_'+Date.now();
-        await DB.insert('perfiles', {id:uid,email:e,password:p,rol:'estudiante',nombre:n});
-        await DB.insert('estudiantes', {id:uid,user_id:uid,nombre:n,grado:g,maestro_id:state.user.docenteId});
+        await API.insert('perfiles', {id:uid,email:e,password:p,rol:'estudiante',nombre:n});
+        await API.insert('estudiantes', {id:uid,user_id:uid,nombre:n,grado:g,maestro_id:state.user.docenteId});
         alert(`Creado!\nEmail: ${e}\nPassword: ${p}`); render();
     }
 
-    async function elimE(id) { if(confirm('¿Eliminar?')) { await DB.delete('estudiantes', id); render(); } }
+    async function elimE(id) { if(confirm('¿Eliminar?')) { await API.delete('estudiantes', id); render(); } }
 
     async function rAsig() {
-        const a = await DB.get('asignaciones', `maestro_id = '${state.user?.docenteId}'`, 'created_at DESC');
+        const a = await API.get('asignaciones', `maestro_id = '${state.user?.docenteId}'`, 'created_at DESC');
         return `<div class="bg-white rounded-2xl p-6 border">
             <h3 class="text-xl font-bold mb-4">Crear Tarea</h3>
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
@@ -470,7 +433,7 @@
     }
 
     async function crearA() {
-        await DB.insert('asignaciones', {id:'asig_'+Date.now(),maestro_id:state.user.docenteId,titulo:document.getElementById('at').value,grado:document.getElementById('ag').value,tipo:document.getElementById('atp').value,descripcion:document.getElementById('ad').value,valor_puntos:parseInt(document.getElementById('ap').value),fecha_vencimiento:document.getElementById('av').value,activa:1});
+        await API.insert('asignaciones', {id:'asig_'+Date.now(),maestro_id:state.user.docenteId,titulo:document.getElementById('at').value,grado:document.getElementById('ag').value,tipo:document.getElementById('atp').value,descripcion:document.getElementById('ad').value,valor_puntos:parseInt(document.getElementById('ap').value),fecha_vencimiento:document.getElementById('av').value,activa:1});
         alert('Creada'); render();
     }
 
@@ -490,7 +453,7 @@
     }
 
     async function guardarQ() {
-        await DB.insert('evaluaciones', {id:'eval_'+Date.now(),maestro_id:state.user.docenteId,titulo:state.data.quiz.titulo,preguntas:JSON.stringify(state.data.quiz.preguntas),grado:document.getElementById('qg').value,activa:1});
+        await API.insert('evaluaciones', {id:'eval_'+Date.now(),maestro_id:state.user.docenteId,titulo:state.data.quiz.titulo,preguntas:JSON.stringify(state.data.quiz.preguntas),grado:document.getElementById('qg').value,activa:1});
         alert('Guardado'); render();
     }
 
@@ -516,7 +479,7 @@
     }
 
     async function guardarP() {
-        await DB.insert('proyectos_steam', {id:'proy_'+Date.now(),maestro_id:state.user.docenteId,titulo:state.data.proy.titulo,resumen:state.data.proy.resumen,materiales:JSON.stringify(state.data.proy.materiales||[]),fases:JSON.stringify(state.data.proy.fases||[])});
+        await API.insert('proyectos_steam', {id:'proy_'+Date.now(),maestro_id:state.user.docenteId,titulo:state.data.proy.titulo,resumen:state.data.proy.resumen,materiales:JSON.stringify(state.data.proy.materiales||[]),fases:JSON.stringify(state.data.proy.fases||[])});
         alert('Guardado');
     }
 
@@ -530,12 +493,12 @@
     }
 
     async function rForo() {
-        const p = await DB.get('foro_docentes', '', 'fecha DESC');
+        const p = await API.get('foro_docentes', '', 'fecha DESC');
         return `<div class="space-y-6"><div class="bg-white rounded-2xl p-6 border"><h3 class="text-xl font-bold mb-4">Nueva Publicación</h3><div class="space-y-4"><input type="text" id="ft" placeholder="Título" class="w-full p-3 rounded-xl border"><textarea id="fc" placeholder="Contenido" rows="3" class="w-full p-3 rounded-xl border"></textarea><button onclick="crearF()" class="bg-blue-600 text-white font-bold px-6 py-2 rounded-xl">Publicar</button></div></div><div class="bg-white rounded-2xl p-6 border"><h3 class="text-xl font-bold mb-4">Comunidad</h3>${p.length?p.map(x=>`<div class="p-4 bg-slate-50 rounded-xl mb-3"><h4 class="font-bold">${x.titulo}</h4><p class="text-sm text-slate-600">${x.contenido}</p><div class="text-xs text-slate-400">${x.fecha}</div></div>`).join(''):'<p class="text-slate-500">Sin publicaciones</p>'}</div></div>`;
     }
 
     async function crearF() {
-        await DB.insert('foro_docentes', {id:'foro_'+Date.now(),maestro_id:state.user.docenteId,titulo:document.getElementById('ft').value,contenido:document.getElementById('fc').value,fecha:new Date().toISOString()});
+        await API.insert('foro_docentes', {id:'foro_'+Date.now(),maestro_id:state.user.docenteId,titulo:document.getElementById('ft').value,contenido:document.getElementById('fc').value,fecha:new Date().toISOString()});
         render();
     }
 
@@ -544,7 +507,7 @@
     }
 
     async function guardarPf() {
-        await DB.update('perfiles', state.user.id, {nombre: document.getElementById('pn').value});
+        await API.update('perfiles', state.user.id, {nombre: document.getElementById('pn').value});
         state.user.nombre = document.getElementById('pn').value; AUTH.save(state.user); alert('Actualizado');
     }
 
@@ -552,10 +515,10 @@
     // VISTAS ADMIN
     // ============================================
     async function ra() {
-        const e = await DB.query("SELECT COUNT(*) as c FROM estudiantes");
-        const d = await DB.query("SELECT COUNT(*) as c FROM docentes");
-        const a = await DB.query("SELECT COUNT(*) as c FROM asignaciones");
-        const ent = await DB.query("SELECT COUNT(*) as c FROM entregas");
+        const e = await API.query("SELECT COUNT(*) as c FROM estudiantes");
+        const d = await API.query("SELECT COUNT(*) as c FROM docentes");
+        const a = await API.query("SELECT COUNT(*) as c FROM asignaciones");
+        const ent = await API.query("SELECT COUNT(*) as c FROM entregas");
         return `<div class="space-y-6">
             <div class="grid grid-cols-2 md:grid-cols-5 gap-4">
                 <div class="bg-white rounded-2xl p-6 border"><div class="text-3xl font-black text-blue-600">${e[0]?.c||0}</div><div class="text-slate-500">Estudiantes</div></div>
@@ -567,28 +530,28 @@
     }
 
     async function rSug() {
-        const s = await DB.get('sugerencias', '', 'fecha DESC');
+        const s = await API.get('sugerencias', '', 'fecha DESC');
         return `<div class="bg-white rounded-2xl p-6 border"><h3 class="text-xl font-bold mb-4">Sugerencias</h3>${s.length?s.map(x=>`<div class="p-4 bg-slate-50 rounded-xl mb-3"><div class="flex justify-between"><span class="font-bold">${x.maestro_id}</span><span class="text-xs text-slate-400">${x.fecha}</span></div><p class="text-slate-700 mt-2">${x.texto}</p>${x.respuesta?`<p class="text-green-600 mt-2">✓ ${x.respuesta}</p>`:`<div class="mt-2 flex gap-2"><input type="text" id="rs-${x.id}" placeholder="Responder..." class="flex-1 p-2 rounded border text-sm"><button onclick="respS('${x.id}')" class="bg-green-600 text-white px-3 py-1 rounded text-sm">Responder</button></div>`}</div>`).join(''):'<p class="text-slate-500">Sin sugerencias</p>'}</div>`;
     }
 
     async function respS(id) {
-        await DB.update('sugerencias', id, {respuesta: document.getElementById('rs-'+id).value, procesada: 1});
+        await API.update('sugerencias', id, {respuesta: document.getElementById('rs-'+id).value, procesada: 1});
         render();
     }
 
     async function rLogs() {
-        const l = await DB.get('logs', '', 'fecha DESC LIMIT 100');
+        const l = await API.get('logs', '', 'fecha DESC LIMIT 100');
         return `<div class="bg-white rounded-2xl p-6 border"><h3 class="text-xl font-bold mb-4">Logs</h3><div class="overflow-x-auto"><table class="w-full text-sm"><thead><tr class="bg-slate-50"><th class="p-2 text-left">Fecha</th><th class="p-2 text-left">Rol</th><th class="p-2 text-left">Usuario</th><th class="p-2 text-left">Acción</th></tr></thead><tbody>${l.length?l.map(x=>`<tr class="border-b"><td class="p-2">${x.fecha}</td><td class="p-2"><span class="bg-slate-100 px-2 py-1 rounded text-xs">${x.rol}</span></td><td class="p-2">${x.usuario}</td><td class="p-2">${x.accion}</td></tr>`).join(''):'<tr><td colspan="4" class="p-4 text-center">Sin logs</td></tr>'}</tbody></table></div></div>`;
     }
 
     async function rConf() {
-        const s = await DB.get('settings');
+        const s = await API.get('settings');
         const c = {}; s.forEach(x => c[x.clave] = x.valor);
         return `<div class="bg-white rounded-2xl p-6 border max-w-2xl"><h3 class="text-xl font-bold mb-4">Configuración</h3><div class="flex items-center justify-between p-4 bg-slate-50 rounded-xl"><div><div class="font-bold">Modo Mantenimiento</div></div><button onclick="toggleM('${c.maintenance_mode}')" class="bg-red-600 text-white px-4 py-2 rounded-lg font-bold">${c.maintenance_mode==='true'?'Desactivar':'Activar'}</button></div></div>`;
     }
 
     async function toggleM(actual) {
-        await DB.update('settings', 'maintenance_mode', {valor: actual === 'true' ? 'false' : 'true'});
+        await API.update('settings', 'maintenance_mode', {valor: actual === 'true' ? 'false' : 'true'});
         render();
     }
 
