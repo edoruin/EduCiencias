@@ -9,12 +9,15 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
         body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
-        .fade-in { animation: fadeIn 0.3s ease-in; }
-        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        .fade-in { animation: fadeIn 0.5s ease-out; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+        .scroll-section { opacity: 0; transform: translateY(50px); transition: all 0.8s ease-out; }
+        .scroll-section.visible { opacity: 1; transform: translateY(0); }
+        .gradient-text { background: linear-gradient(135deg, #10b981, #3b82f6); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+        html { scroll-behavior: smooth; }
     </style>
     
     <script>
-        // CONFIGURACIÓN
         window.EDUCIENCIAS_CONFIG = {
             d1ApiUrl: 'https://educiencias.edwinjeremiasagustinyack.workers.dev',
             d1ApiKey: 'dev-token',
@@ -23,51 +26,56 @@
         };
     </script>
 </head>
-<body class="bg-slate-50 text-slate-800 min-h-screen">
+<body class="bg-slate-50">
     <div id="app"></div>
 
     <script>
     // ============================================
-    // CLOUDFLARE WORKER API CLIENT
+    // ROUTER
+    // ============================================
+    const ROUTES = {
+        '': 'landing',
+        '#landing': 'landing',
+        '#registro': 'registro',
+        '#login': 'login',
+        '#dashboard': 'dashboard'
+    };
+
+    function router() {
+        const hash = window.location.hash || '#landing';
+        return ROUTES[hash] || 'landing';
+    }
+
+    // ============================================
+    // API CLIENT
     // ============================================
     const API = {
         url: window.EDUCIENCIAS_CONFIG.d1ApiUrl,
         key: window.EDUCIENCIAS_CONFIG.d1ApiKey,
         
         async request(endpoint, options = {}) {
-            const headers = {
-                'Authorization': `Bearer ${this.key}`,
-                'Content-Type': 'application/json'
-            };
-            
+            const headers = { 'Authorization': `Bearer ${this.key}`, 'Content-Type': 'application/json' };
             const url = `${this.url}${endpoint}`;
             let resp;
             
-            if (options.method === 'POST') {
-                resp = await fetch(url, { method: 'POST', headers, body: JSON.stringify(options.body) });
-            } else if (options.method === 'PATCH') {
-                resp = await fetch(url + '/' + options.id, { method: 'PATCH', headers, body: JSON.stringify(options.body) });
-            } else if (options.method === 'DELETE') {
-                resp = await fetch(url + '/' + options.id, { method: 'DELETE', headers });
-            } else {
-                resp = await fetch(url, { headers });
-            }
+            if (options.method === 'POST') resp = await fetch(url, { method: 'POST', headers, body: JSON.stringify(options.body) });
+            else if (options.method === 'PATCH') resp = await fetch(url + '/' + options.id, { method: 'PATCH', headers, body: JSON.stringify(options.body) });
+            else if (options.method === 'DELETE') resp = await fetch(url + '/' + options.id, { method: 'DELETE', headers });
+            else resp = await fetch(url, { headers });
             
             if (!resp.ok) { console.error('API Error:', await resp.text()); return options.isArray !== false ? [] : null; }
-            const data = await resp.json();
-            return data;
+            return await resp.json();
         },
         
-        // Shortcuts
-        async get(table, isArray = true) { return this.request(`/${table}`); },
-        async getBy(table, filter, isArray = true) { return this.request(`/${table}?${filter}`); },
+        async get(table) { return this.request(`/${table}`); },
+        async getBy(table, filter) { return this.request(`/${table}?${filter}`); },
         async post(table, data) { return this.request(`/${table}`, { method: 'POST', body: data }); },
         async patch(table, id, data) { return this.request(`/${table}`, { method: 'PATCH', id, body: data }); },
         async delete(table, id) { return this.request(`/${table}`, { method: 'DELETE', id }); }
     };
 
     // ============================================
-    // AUTH (via Worker API)
+    // AUTH
     // ============================================
     const AUTH = {
         async login(email, password) {
@@ -86,478 +94,303 @@
     };
 
     // ============================================
-    // HUGGINGFACE (Inference API)
-    // ============================================
-    const HF = {
-        token: window.EDUCIENCIAS_CONFIG.hfToken,
-        model: window.EDUCIENCIAS_CONFIG.hfModel,
-        
-        async generate(prompt, maxTokens = 512) {
-            if (!this.token || !this.model) return "IA no configurada";
-            try {
-                const resp = await fetch(`https://api-inference.huggingface.co/models/${this.model}`, {
-                    method: 'POST',
-                    headers: { 'Authorization': `Bearer ${this.token}`, 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ inputs: prompt, parameters: { max_new_tokens: maxTokens, temperature: 0.7 } })
-                });
-                if (resp.ok) { const d = await resp.json(); return Array.isArray(d) ? d[0]?.generated_text : d.generated_text; }
-            } catch (e) { console.error('HF:', e); }
-            return "IA no disponible";
-        },
-        
-        async tutor(grado, pregunta) {
-            return this.generate(`Eres tutor de ciencias para ${grado}. Responde en español.\n\nPregunta: ${pregunta}\nTutor:`);
-        },
-        
-        async validarHipotesis(h) {
-            return this.generate(`Analiza esta hipótesis:\n\n${h}\n\nAnálisis:`, 1024);
-        },
-        
-        async generarQuiz(tema, grado) {
-            const r = await this.generate(`Quiz JSON sobre ${tema} para ${grado}. Formato: {"titulo":"...","preguntas":[{"tipo":"seleccion","pregunta":"...","opciones":["A","B"],"respuesta":"A"}]}`, 1024);
-            try { return JSON.parse(r); } catch { return { error: 'Error' }; }
-        },
-        
-        async generarSimulacion(desc) {
-            const r = await this.generate(`HTML5 Canvas simulador. ${desc}. JSON: {"html":"<code>","explicacion":"..."}`, 2048);
-            try { return JSON.parse(r); } catch { return { html: r }; }
-        },
-        
-        async generarProyecto(titulo, steam, tema) {
-            const d = Object.entries(steam).filter(([k,v]) => v).map(([k]) => k).join(', ');
-            const r = await this.generate(`STEAM "${titulo}" (${d}). Tema: ${tema}. JSON: {"resumen":"...","materiales":[],"fases":[]}`, 1024);
-            try { return JSON.parse(r); } catch { return { error: 'Error' }; }
-        },
-        
-        async buscarBiodiversidad(esp) {
-            const r = await this.generate(`Biodiversidad RD: ${esp}. JSON: {"nombre":"...","descripcion":"...","tipo":"planta"}`, 512);
-            try { return JSON.parse(r); } catch { return { nombre: esp, descripcion: r }; }
-        }
-    };
-
-    // ============================================
     // STATE
     // ============================================
-    let state = { user: null, view: 'login', data: {} };
+    let state = { user: null, view: 'landing', data: {} };
 
     const TODOS_LOS_GRADOS = ['1ro de Primaria','2do de Primaria','3ro de Primaria','4to de Primaria','5to de Primaria','6to de Primaria','1ro de Secundaria','2do de Secundaria','3ro de Secundaria','4to de Secundaria','5to de Secundaria','6to de Secundaria'];
     const ESCUELAS = ['Politécnico Lilia Bayona','Politécnico Escuela Hogar del Niño','Politécnico Evangelico Shalom','Polécnico María Auxiliadora','Politécnico Max Simón','Politécnico Prof. Miguel Infante Santana','Politécnico Luis Heriberto Payán','Polécnico Prof. Mercedes María Lazala Mejía','Fundación MIR Campo Verde','Fundación MIR Esperanza','Politécnico San José de Calasanz','Colegio Saint Nicolas','Escuela Calasanz-San Pedro'];
     const FRASES = [{f:"La educación es el arma más poderosa para cambiar el mundo.",a:"Nelson Mandela"},{f:"La curiosidad es la fuerza impulsora de la ciencia.",a:"Albert Einstein"},{f:"La ciencia es más que un cuerpo de conocimientos.",a:"Carl Sagan"}];
 
     // ============================================
-    // LOGIN
+    // SCROLL INTELLIGENCE
+    // ============================================
+    function initScrollObserver() {
+        const observer = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) entry.target.classList.add('visible');
+            });
+        }, { threshold: 0.1 });
+        
+        document.querySelectorAll('.scroll-section').forEach(el => observer.observe(el));
+    }
+
+    // ============================================
+    // LANDING PAGE
+    // ============================================
+    function renderLanding() {
+        return `
+        <div class="min-h-screen">
+            <!-- Navbar -->
+            <nav class="fixed w-full bg-white/90 backdrop-blur-md z-50 border-b">
+                <div class="max-w-6xl mx-auto px-4 py-4 flex justify-between items-center">
+                    <div class="flex items-center gap-2">
+                        <i class="fas fa-flask text-green-600 text-2xl"></i>
+                        <span class="text-xl font-black">EduCiencias</span>
+                    </div>
+                    <div class="flex gap-4">
+                        <button onclick="location.hash='#login'" class="px-4 py-2 font-bold text-slate-600 hover:text-slate-800">Iniciar Sesión</button>
+                        <button onclick="location.hash='#registro'" class="px-4 py-2 bg-green-600 text-white font-bold rounded-xl hover:bg-green-700">Registrarse</button>
+                    </div>
+                </div>
+            </nav>
+
+            <!-- Hero -->
+            <section class="pt-32 pb-20 px-4 bg-gradient-to-br from-green-400 via-blue-500 to-indigo-600">
+                <div class="max-w-4xl mx-auto text-center text-white">
+                    <h1 class="text-5xl md:text-7xl font-black mb-6 fade-in">EduCiencias IA</h1>
+                    <p class="text-xl md:text-2xl mb-8 opacity-90 fade-in">Plataforma inteligente de ciencias naturales con tutor de IA</p>
+                    <button onclick="location.hash='#registro'" class="px-8 py-4 bg-white text-green-600 font-bold text-xl rounded-full hover:scale-105 transition-transform fade-in">¡Comienza Ahora!</button>
+                </div>
+            </section>
+
+            <!-- Características -->
+            <section class="py-20 px-4 scroll-section">
+                <div class="max-w-6xl mx-auto">
+                    <h2 class="text-4xl font-black text-center mb-12 gradient-text">¿Por qué usar EduCiencias?</h2>
+                    <div class="grid md:grid-cols-3 gap-8">
+                        <div class="bg-white p-8 rounded-3xl shadow-lg text-center">
+                            <div class="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4"><i class="fas fa-robot text-green-600 text-2xl"></i></div>
+                            <h3 class="text-xl font-bold mb-2">Tutor IA</h3>
+                            <p class="text-slate-600">Aprende con un tutor inteligente que te ayuda en tiempo real</p>
+                        </div>
+                        <div class="bg-white p-8 rounded-3xl shadow-lg text-center">
+                            <div class="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4"><i class="fas fa-flask text-blue-600 text-2xl"></i></div>
+                            <h3 class="text-xl font-bold mb-2">Laboratorio Virtual</h3>
+                            <p class="text-slate-600">Experimenta con hipótesis científicas de forma segura</p>
+                        </div>
+                        <div class="bg-white p-8 rounded-3xl shadow-lg text-center">
+                            <div class="w-16 h-16 bg-purple-100 rounded-full flex items-center justify-center mx-auto mb-4"><i class="fas fa-lightbulb text-purple-600 text-2xl"></i></div>
+                            <h3 class="text-xl font-bold mb-2">Proyectos STEAM</h3>
+                            <p class="text-slate-600">Crea proyectos interdisciplinarios con ayuda de IA</p>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Funcionalidades -->
+            <section class="py-20 px-4 bg-slate-100 scroll-section">
+                <div class="max-w-6xl mx-auto">
+                    <h2 class="text-4xl font-black text-center mb-12">Todo lo que necesitas</h2>
+                    <div class="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
+                        <div class="bg-white p-6 rounded-2xl shadow"><i class="fas fa-users text-green-600 text-xl mb-2"></i><h4 class="font-bold">Gestión de Estudiantes</h4></div>
+                        <div class="bg-white p-6 rounded-2xl shadow"><i class="fas fa-tasks text-blue-600 text-xl mb-2"></i><h4 class="font-bold">Tareas y Laboratorios</h4></div>
+                        <div class="bg-white p-6 rounded-2xl shadow"><i class="fas fa-question-circle text-orange-600 text-xl mb-2"></i><h4 class="font-bold">Quizzes con IA</h4></div>
+                        <div class="bg-white p-6 rounded-2xl shadow"><i class="fas fa-leaf text-green-600 text-xl mb-2"></i><h4 class="font-bold">Biodiversidad RD</h4></div>
+                        <div class="bg-white p-6 rounded-2xl shadow"><i class="fas fa-comments text-indigo-600 text-xl mb-2"></i><h4 class="font-bold">Foro Docente</h4></div>
+                        <div class="bg-white p-6 rounded-2xl shadow"><i class="fas fa-chart-bar text-purple-600 text-xl mb-2"></i><h4 class="font-bold">Estadísticas</h4></div>
+                        <div class="bg-white p-6 rounded-2xl shadow"><i class="fas fa-book-open text-teal-600 text-xl mb-2"></i><h4 class="font-bold">Diario Científico</h4></div>
+                        <div class="bg-white p-6 rounded-2xl shadow"><i class="fas fa-robot text-slate-600 text-xl mb-2"></i><h4 class="font-bold">Simuladores IA</h4></div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- CTA -->
+            <section class="py-20 px-4 bg-gradient-to-r from-green-500 to-blue-600 scroll-section">
+                <div class="max-w-3xl mx-auto text-center text-white">
+                    <h2 class="text-4xl font-black mb-4">¡Únete a la revolución educativa!</h2>
+                    <p class="text-xl mb-8">Miles de estudiantes y docentes ya están usando EduCiencias</p>
+                    <button onclick="location.hash='#registro'" class="px-8 py-4 bg-white text-green-600 font-bold text-xl rounded-full">Crear Cuenta Gratis</button>
+                </div>
+            </section>
+
+            <!-- Footer -->
+            <footer class="bg-slate-900 text-white py-12 px-4">
+                <div class="max-w-6xl mx-auto text-center">
+                    <div class="flex justify-center gap-2 mb-4"><i class="fas fa-flask text-green-400 text-2xl"></i><span class="text-xl font-bold">EduCiencias IA</span></div>
+                    <p class="text-slate-400">© 2026 EduCiencias. Plataforma de Ciencias Naturales.</p>
+                </div>
+            </footer>
+        </div>`;
+    }
+
+    // ============================================
+    // REGISTRO PAGE
+    // ============================================
+    function renderRegistro() {
+        return `
+        <div class="min-h-screen bg-gradient-to-br from-green-400 to-blue-500 flex items-center justify-center p-4">
+            <div class="bg-white rounded-3xl shadow-2xl p-8 max-w-lg w-full">
+                <div class="text-center mb-6">
+                    <button onclick="location.hash='#landing'" class="text-green-600 font-bold mb-4"><i class="fas fa-arrow-left"></i> Volver</button>
+                    <div class="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4"><i class="fas fa-chalkboard-teacher text-green-600 text-2xl"></i></div>
+                    <h1 class="text-3xl font-black">Registro de Docente</h1>
+                    <p class="text-slate-500">¡Únete a la comunidad EduCiencias!</p>
+                </div>
+                
+                <div id="re-mensaje" class="hidden bg-red-50 text-red-600 p-3 rounded-xl text-sm mb-4 text-center"></div>
+                
+                <form onsubmit="event.preventDefault(); registrarDocente();" class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-bold mb-1">Nombre Completo</label>
+                        <input type="text" id="rn" required class="w-full px-4 py-3 rounded-xl border" placeholder="Tu nombre">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-bold mb-1">Email</label>
+                        <input type="email" id="re" required class="w-full px-4 py-3 rounded-xl border" placeholder="tu@email.com">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-bold mb-1">Contraseña</label>
+                        <input type="password" id="rpw" required class="w-full px-4 py-3 rounded-xl border" placeholder="••••••••">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-bold mb-1">Escuela</label>
+                        <select id="resc" required class="w-full px-4 py-3 rounded-xl border">
+                            <option value="">Selecciona tu escuela</option>
+                            ${ESCUELAS.map(e=>`<option value="${e}">${e}</option>`).join('')}
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-bold mb-1">Grados en los que imparte</label>
+                        <div class="grid grid-cols-2 gap-2 max-h-40 overflow-y-auto p-2 bg-slate-50 rounded-lg border">
+                            ${TODOS_LOS_GRADOS.map(g=>`<label class="flex items-center gap-2 text-xs cursor-pointer"><input type="checkbox" value="${g}" class="rgc"> ${g}</label>`).join('')}
+                        </div>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-bold mb-1">¿Por qué usas esta página?</label>
+                        <textarea id="rrazon" rows="2" class="w-full px-4 py-3 rounded-xl border" placeholder="Tu motivación..."></textarea>
+                    </div>
+                    <button type="submit" class="w-full bg-green-600 text-white font-bold py-3 rounded-xl hover:bg-green-700">Crear Cuenta</button>
+                </form>
+                
+                <p class="text-center mt-4 text-slate-500">¿Ya tienes cuenta? <button onclick="location.hash='#login'" class="text-green-600 font-bold">Iniciar Sesión</button></p>
+            </div>
+        </div>`;
+    }
+
+    async function registrarDocente() {
+        const n = document.getElementById('rn').value;
+        const e = document.getElementById('re').value;
+        const pw = document.getElementById('rpw').value;
+        const esc = document.getElementById('resc').value;
+        const gs = Array.from(document.querySelectorAll('.rgc:checked')).map(c=>c.value);
+        const raz = document.getElementById('rrazon').value;
+        
+        if (!n || !e || !pw || !esc || !gs.length) {
+            document.getElementById('re-mensaje').textContent = 'Completa todos los campos';
+            document.getElementById('re-mensaje').classList.remove('hidden');
+            return;
+        }
+        
+        const r = await AUTH.register(e, pw, n, 'docente', {escuela: esc, grados: gs, razon: raz});
+        if (r) {
+            alert('¡Registro exitoso! Ahora puedes iniciar sesión.');
+            location.hash = '#login';
+        } else {
+            document.getElementById('re-mensaje').textContent = 'Error al registrar';
+            document.getElementById('re-mensaje').classList.remove('hidden');
+        }
+    }
+
+    // ============================================
+    // LOGIN PAGE
     // ============================================
     function renderLogin() {
-        return `<div class="min-h-screen flex items-center justify-center bg-gradient-to-br from-green-400 to-blue-500 p-4">
-            <div id="lc" class="bg-white rounded-3xl shadow-2xl p-8 max-w-md w-full">
-                <div class="flex justify-center mb-6"><div class="bg-green-100 p-4 rounded-full"><i class="fas fa-flask text-green-600 text-3xl"></i></div></div>
-                <h1 class="text-3xl font-extrabold text-center mb-2">EduCiencias IA</h1>
-                <p class="text-center text-slate-500 mb-6">Plataforma de Ciencias Naturales</p>
-                <div id="le" class="hidden bg-red-50 text-red-600 p-3 rounded-xl text-sm mb-4 text-center"></div>
-                <div class="space-y-4">
-                    <div><label class="block text-sm font-bold mb-1">Email</label><input type="email" id="lem" class="w-full px-4 py-3 rounded-xl border" placeholder="tu@email.com"></div>
-                    <div><label class="block text-sm font-bold mb-1">Contraseña</label><input type="password" id="lpw" class="w-full px-4 py-3 rounded-xl border" placeholder="Contraseña"></div>
-                    <button onclick="hl()" class="w-full bg-slate-800 text-white font-bold py-3 rounded-xl mt-4">Ingresar</button>
-                    <div class="text-center mt-4"><p class="text-sm text-slate-500">¿Eres maestro sin cuenta?</p><button onclick="mr()" class="text-blue-600 font-bold text-sm">Registrarse</button></div>
+        return `
+        <div class="min-h-screen bg-gradient-to-br from-green-400 to-blue-500 flex items-center justify-center p-4">
+            <div class="bg-white rounded-3xl shadow-2xl p-8 max-w-md w-full">
+                <div class="text-center mb-6">
+                    <button onclick="location.hash='#landing'" class="text-green-600 font-bold mb-4"><i class="fas fa-arrow-left"></i> Volver</button>
+                    <div class="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4"><i class="fas fa-flask text-green-600 text-2xl"></i></div>
+                    <h1 class="text-3xl font-black">EduCiencias</h1>
+                    <p class="text-slate-500">Inicia sesión en la plataforma</p>
                 </div>
+                
+                <div id="le-mensaje" class="hidden bg-red-50 text-red-600 p-3 rounded-xl text-sm mb-4 text-center"></div>
+                
+                <form onsubmit="event.preventDefault(); login();" class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-bold mb-1">Email</label>
+                        <input type="email" id="lem" required class="w-full px-4 py-3 rounded-xl border" placeholder="tu@email.com">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-bold mb-1">Contraseña</label>
+                        <input type="password" id="lpw" required class="w-full px-4 py-3 rounded-xl border" placeholder="••••••••">
+                    </div>
+                    <button type="submit" class="w-full bg-green-600 text-white font-bold py-3 rounded-xl hover:bg-green-700">Ingresar</button>
+                </form>
+                
+                <p class="text-center mt-4 text-slate-500">¿Nuevo docente? <button onclick="location.hash='#registro'" class="text-green-600 font-bold">Registrarse</button></p>
             </div>
         </div>`;
     }
 
-    async function hl() {
-        const u = document.getElementById('lem').value, p = document.getElementById('lpw').value;
+    async function login() {
+        const u = document.getElementById('lem').value;
+        const p = document.getElementById('lpw').value;
         const user = await AUTH.login(u, p);
-        if (user) { state.user = user; AUTH.save(user); state.view = 'dashboard'; render(); }
-        else { document.getElementById('le').textContent = 'Credenciales incorrectas'; document.getElementById('le').classList.remove('hidden'); }
-    }
-
-    function mr() {
-        document.getElementById('lc').innerHTML = `<div class="text-center mb-6"><h2 class="text-2xl font-black">Registro de Maestro</h2></div>
-            <div class="space-y-4">
-                <div><label class="block text-sm font-bold mb-1">Nombre</label><input type="text" id="rn" class="w-full px-4 py-3 rounded-xl border"></div>
-                <div><label class="block text-sm font-bold mb-1">Email</label><input type="email" id="re" class="w-full px-4 py-3 rounded-xl border"></div>
-                <div><label class="block text-sm font-bold mb-1">Contraseña</label><input type="password" id="rpw" class="w-full px-4 py-3 rounded-xl border"></div>
-                <div><label class="block text-sm font-bold mb-1">Escuela</label><select id="resc" class="w-full px-4 py-3 rounded-xl border"><option value="">Selecciona</option>${ESCUELAS.map(e=>`<option value="${e}">${e}</option>`).join('')}</select></div>
-                <div><label class="block text-sm font-bold mb-1">Grados</label><div class="grid grid-cols-2 gap-2 max-h-32 overflow-y-auto p-2 bg-slate-50 rounded-lg border">${TODOS_LOS_GRADOS.map(g=>`<label class="flex items-center gap-2 text-xs"><input type="checkbox" value="${g}" class="rgc"> ${g}</label>`).join('')}</div></div>
-                <button onclick="hr()" class="w-full bg-blue-600 text-white font-bold py-3 rounded-xl">Registrarse</button>
-                <button onclick="render()" class="w-full text-slate-500 text-sm py-2">Cancelar</button>
-            </div>`;
-    }
-
-    async function hr() {
-        const n = document.getElementById('rn').value, e = document.getElementById('re').value, pw = document.getElementById('rpw').value, esc = document.getElementById('resc').value, gs = Array.from(document.querySelectorAll('.rgc:checked')).map(c=>c.value);
-        if (!n || !e || !pw || !esc || !gs.length) return alert('Completa todos los campos');
-        const r = await AUTH.register(e, pw, n, 'docente', {escuela: esc, grados: gs});
-        if (r) { alert('¡Registro exitoso!'); render(); }
-    }
-
-    async function logout() { AUTH.clear(); state.user = null; state.view = 'login'; render(); }
-
-    // ============================================
-    // SIDEBAR
-    // ============================================
-    function renderSidebar() {
-        const m = { admin: [{id:'dashboard',l:'Estadísticas',i:'fa-chart-bar'},{id:'sugerencias',l:'Sugerencias',i:'fa-envelope'},{id:'logs',l:'Logs',i:'fa-history'},{id:'config',l:'Config',i:'fa-cog'}],
-            docente: [{id:'dashboard',l:'Panel',i:'fa-calendar'},{id:'estudiantes',l:'Estudiantes',i:'fa-users'},{id:'asignaciones',l:'Tareas',i:'fa-tasks'},{id:'evaluaciones',l:'Quizzes',i:'fa-question-circle'},{id:'proyectos',l:'STEAM',i:'fa-lightbulb'},{id:'simulador',l:'Simulador',i:'fa-robot'},{id:'foro',l:'Comunidad',i:'fa-comments'},{id:'biodiversidad',l:'Biodiversidad',i:'fa-leaf'},{id:'perfil',l:'Perfil',i:'fa-user'}],
-            estudiante: [{id:'dashboard',l:'Mi Progreso',i:'fa-book'},{id:'tutor',l:'Tutor IA',i:'fa-comments'},{id:'metacognicion',l:'Diario',i:'fa-book-open'},{id:'hipotesis',l:'Hipótesis',i:'fa-flask'},{id:'biodiversidad',l:'Biodiversidad',i:'fa-leaf'}] };
-        const it = m[state.user?.rol] || [];
-        return `<aside class="w-64 bg-white border-r border-slate-200 flex flex-col h-screen fixed overflow-y-auto">
-            <div class="p-6 border-b"><div class="flex items-center gap-3"><div class="bg-slate-800 p-2 rounded-xl text-white"><i class="fas fa-flask"></i></div><span class="text-lg font-black">EduCiencias</span></div></div>
-            <nav class="p-4 space-y-2">${it.map(i=>`<button onclick="nav('${i.id}')" class="w-full flex items-center gap-3 px-4 py-3 rounded-xl font-bold text-sm ${state.view===i.id?'bg-indigo-50 text-indigo-700 border border-indigo-100':'text-slate-500 hover:bg-slate-50'}"><i class="fas ${i.i} ${state.view===i.id?'text-indigo-600':'text-slate-400'}"></i>${i.l}</button>`).join('')}</nav>
-            <div class="p-4 border-t mt-auto"><button onclick="logout()" class="w-full flex items-center justify-center gap-2 px-4 py-3 text-red-500 hover:bg-red-50 rounded-xl font-bold text-sm"><i class="fas fa-sign-out-alt"></i> Salir</button></div>
-        </aside>`;
-    }
-
-    function nav(v) { state.view = v; render(); }
-    async function rm() {
-        const c = await renderContent();
-        return `<div class="ml-64 min-h-screen"><header class="bg-white p-6 border-b flex justify-between items-center"><div><h2 class="text-2xl font-black">¡Hola, ${state.user?.nombre||'Usuario'}!</h2><p class="text-sm text-slate-500">${state.user?.rol==='estudiante'?state.user?.grado:state.user?.rol==='docente'?state.user?.escuela:'Admin'}</p></div><div class="h-12 w-12 bg-slate-800 rounded-full flex items-center justify-center text-xl font-black text-white">${(state.user?.nombre||'U').charAt(0)}</div></header><main class="p-8">${c}</main></div>`;
-    }
-
-    async function renderContent() {
-        const v = state.view;
-        if (v==='dashboard') return state.user?.rol==='admin'?await ra():state.user?.rol==='docente'?await rd():await re();
-        if (v==='estudiantes') return await rEst(); if (v==='asignaciones') return await rAsig(); if (v==='evaluaciones') return await rEval();
-        if (v==='proyectos') return await rProy(); if (v==='simulador') return await rSim(); if (v==='foro') return await rForo();
-        if (v==='biodiversidad') return await rBio(); if (v==='perfil') return await rPerf(); if (v==='sugerencias') return await rSug();
-        if (v==='logs') return await rLogs(); if (v==='config') return await rConf();
-        if (v==='tutor') return await rTutor(); if (v==='metacognicion') return await rMeta(); if (v==='hipotesis') return await rHip();
-        return '<div>En desarrollo...</div>';
-    }
-
-    function render() {
-        const a = document.getElementById('app');
-        if (!state.user && state.view !== 'login') state.view = 'login';
-        if (state.view === 'login') { a.innerHTML = renderLogin(); return; }
-        a.innerHTML = renderSidebar() + `<div class="fade-in">${rm()}</div>`;
+        
+        if (user) {
+            state.user = user;
+            AUTH.save(user);
+            location.hash = '#dashboard';
+        } else {
+            document.getElementById('le-mensaje').textContent = 'Credenciales incorrectas';
+            document.getElementById('le-mensaje').classList.remove('hidden');
+        }
     }
 
     // ============================================
-    // VISTAS ESTUDIANTE
+    // DASHBOARD (Basic for now)
     // ============================================
-    async function re() {
+    function renderDashboard() {
         const f = FRASES[Math.floor(Math.random()*FRASES.length)];
-        const asig = await API.get('asignaciones', `grado = '${state.user?.grado}' AND activa = 1`);
-        const ent = await API.get('entregas', `estudiante_id = '${state.user?.estudianteId}'`);
-        const calif = ent.filter(e => e.calificacion);
-        const prom = calif.length ? Math.round(calif.reduce((a,b)=>a+b.calificacion,0)/calif.length) : 0;
-        return `<div class="space-y-6">
-            <div class="bg-gradient-to-r from-emerald-500 to-teal-600 rounded-3xl p-8 text-white">
-                <h3 class="text-3xl font-black mb-1">¡Hola ${state.user?.nombre}!</h3><p class="text-emerald-100">Estudiando en ${state.user?.grado}</p>
-                <div class="mt-4 bg-white/20 rounded-xl p-4"><p class="text-lg italic">"${f.f}"</p><p class="text-sm text-right">- ${f.a}</p></div>
-                <button onclick="nav('tutor')" class="mt-4 bg-white text-emerald-600 font-bold px-6 py-3 rounded-xl">Comenzar a aprender</button>
-            </div>
-            <div class="bg-white rounded-2xl p-6 border"><h4 class="text-xl font-bold mb-4">Mi Progreso: ${prom}%</h4>
-                <div class="w-full bg-slate-200 rounded-full h-3 mb-4"><div class="bg-emerald-500 h-3 rounded-full" style="width:${prom}%"></div></div>
-                <div class="grid grid-cols-3 gap-4 text-center">
-                    <div class="bg-amber-50 rounded-xl p-4"><div class="text-2xl font-black text-amber-600">${ent.length}</div><div class="text-xs">Entregas</div></div>
-                    <div class="bg-purple-50 rounded-xl p-4"><div class="text-2xl font-black text-purple-600">${asig.length}</div><div class="text-xs">Tareas</div></div>
-                    <div class="bg-blue-50 rounded-xl p-4"><div class="text-2xl font-black text-blue-600">${calif.length}</div><div class="text-xs">Calificadas</div></div>
+        return `
+        <div class="min-h-screen bg-slate-50">
+            <nav class="bg-white border-b px-6 py-4 flex justify-between items-center">
+                <div class="flex items-center gap-2"><i class="fas fa-flask text-green-600"></i><span class="font-black">EduCiencias</span></div>
+                <div class="flex items-center gap-4">
+                    <span class="font-bold">${state.user?.nombre}</span>
+                    <button onclick="logout()" class="text-red-500 font-bold">Salir</button>
+                </div>
+            </nav>
+            <div class="p-8">
+                <div class="bg-gradient-to-r from-green-500 to-blue-600 rounded-3xl p-8 text-white mb-8">
+                    <h2 class="text-3xl font-black">¡Bienvenido, ${state.user?.nombre}!</h2>
+                    <p class="opacity-90">${state.user?.escuela}</p>
+                    <div class="mt-4 bg-white/20 rounded-xl p-4"><p class="italic">"${f.f}"</p><p class="text-sm text-right">- ${f.a}</p></div>
+                </div>
+                <div class="bg-white rounded-2xl p-6 border">
+                    <h3 class="text-xl font-bold mb-4">Panel de ${state.user?.rol}</h3>
+                    <p class="text-slate-500">Más funcionalidades coming soon...</p>
                 </div>
             </div>
-            <div class="bg-white rounded-2xl p-6 border"><h4 class="text-xl font-bold mb-4">Mis Tareas</h4>
-                ${asig.length?asig.map(a=>`<div class="p-4 bg-slate-50 rounded-xl mb-2 flex justify-between items-center"><div><div class="font-bold">${a.titulo} ${a.tipo==='laboratorio'?'<span class="text-xs px-2 py-1 rounded bg-emerald-100">🧪</span>':''}</div></div>${a.tipo==='laboratorio'?`<button onclick="abrLab('${a.id}','${a.titulo}')" class="bg-emerald-600 text-white px-4 py-2 rounded-lg font-bold text-sm">🧪</button>`:`<button onclick="ent('${a.id}','${a.titulo}')" class="bg-green-600 text-white px-4 py-2 rounded-lg font-bold text-sm">Entregar</button>`}</div>`).join(''):'<p class="text-slate-500">No hay tareas</p>'}
-            </div>
         </div>`;
     }
 
-    async function ent(aid, tit) {
-        const c = prompt('Tu respuesta:');
-        if (!c) return;
-        await API.insert('entregas', {id:'ent_'+Date.now(),estudiante_id:state.user.estudianteId,asignacion_id:aid,contenido:c,fecha_entrega:new Date().toISOString()});
-        alert('¡Entregada!'); render();
-    }
-
-    function abrLab(id, tit) {
-        const m = document.createElement('div'); m.className = 'fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4';
-        m.innerHTML = `<div class="bg-white rounded-2xl p-6 max-w-2xl w-full"><h3 class="text-xl font-bold mb-4">🧪 ${tit}</h3>
-            <div class="space-y-4"><div><label class="block font-bold">1. Hipótesis</label><textarea id="lh" rows="2" class="w-full p-3 rounded-xl border"></textarea></div>
-            <div><label class="block font-bold">2. Materiales</label><textarea id="lm" rows="2" class="w-full p-3 rounded-xl border"></textarea></div>
-            <div><label class="block font-bold">3. Observaciones</label><textarea id="lo" rows="2" class="w-full p-3 rounded-xl border"></textarea></div>
-            <div><label class="block font-bold">4. Conclusiones</label><textarea id="lc" rows="3" class="w-full p-3 rounded-xl border"></textarea></div>
-            <button onclick="envLab('${id}')" class="w-full bg-emerald-600 text-white font-bold py-3 rounded-xl">Entregar</button></div></div>`;
-        document.body.appendChild(m);
-    }
-
-    async function envLab(id) {
-        await API.insert('entregas', {id:'ent_'+Date.now(),estudiante_id:state.user.estudianteId,asignacion_id:id,cuaderno:JSON.stringify({h:document.getElementById('lh').value,m:document.getElementById('lm').value,o:document.getElementById('lo').value,c:document.getElementById('lc').value}),tipo:'laboratorio',fecha_entrega:new Date().toISOString()});
-        document.querySelector('.fixed')?.remove(); alert('¡Entregado!'); render();
-    }
-
-    function rTutor() {
-        return `<div class="bg-white rounded-2xl p-6 border border-slate-200 h-[600px] flex flex-col">
-            <h3 class="text-xl font-bold mb-4"><i class="fas fa-comments mr-2"></i>Tutor IA</h3>
-            <div id="tc" class="flex-1 overflow-y-auto p-4 bg-slate-50 rounded-xl mb-4 space-y-4"><div class="flex"><div class="bg-blue-100 p-3 rounded-xl max-w-md">¡Hola! ¿Qué quieres aprender?</div></div></div>
-            <div class="flex gap-2"><input type="text" id="ti" placeholder="Pregunta..." class="flex-1 p-3 rounded-xl border" onkeypress="if(event.key==='Enter')envTutor()"><button onclick="envTutor()" class="bg-blue-600 text-white px-6 rounded-xl font-bold"><i class="fas fa-paper-plane"></i></button></div>
-        </div>`;
-    }
-
-    async function envTutor() {
-        const p = document.getElementById('ti').value; if (!p) return;
-        const c = document.getElementById('tc');
-        c.innerHTML += `<div class="flex justify-end"><div class="bg-green-100 p-3 rounded-xl max-w-md">${p}</div></div>`;
-        document.getElementById('ti').value = '';
-        const r = await HF.tutor(state.user?.grado||'secundaria', p);
-        c.innerHTML += `<div class="flex"><div class="bg-blue-100 p-3 rounded-xl max-w-md">${r}</div></div>`;
-        c.scrollTop = c.scrollHeight;
-    }
-
-    function rHip() {
-        return `<div class="bg-gradient-to-r from-purple-600 to-indigo-600 rounded-3xl p-8 text-white"><h3 class="text-2xl font-black"><i class="fas fa-flask mr-2"></i>Laboratorio de Hipótesis</h3></div>
-        <div class="bg-white rounded-2xl p-6 border border-slate-200 mt-6">
-            <h4 class="text-lg font-bold mb-4">¿Qué crees que pasaría si...</h4>
-            <textarea id="hi" rows="3" class="w-full p-4 rounded-xl border mb-4" placeholder="Ej. Si le pongo azúcar a la planta..."></textarea>
-            <button onclick="analizarH()" class="bg-purple-600 text-white font-bold px-8 py-3 rounded-xl">Analizar</button>
-        </div>
-        <div id="hr" class="hidden mt-6 bg-white rounded-2xl p-6 border border-slate-200"></div>`;
-    }
-
-    async function analizarH() {
-        const h = document.getElementById('hi').value; if (!h) return;
-        document.querySelector('button[onclick="analizarH()"]').innerHTML = '<i class="fas fa-spinner fa-spin"></i>...';
-        const r = await HF.validarHipotesis(h);
-        document.querySelector('button[onclick="analizarH()"]').innerHTML = 'Analizar';
-        document.getElementById('hr').classList.remove('hidden');
-        document.getElementById('hr').innerHTML = `<h4 class="font-bold text-purple-700 mb-4">Análisis</h4><p>${r.replace(/\n/g,'<br>')}</p>`;
-    }
-
-    async function rMeta() {
-        const ent = await API.get('metacognicion', `estudiante_id = '${state.user?.estudianteId}'`, 'fecha DESC');
-        return `<div class="bg-teal-50 rounded-2xl p-6 border-2 border-teal-200">
-            <h3 class="text-xl font-black text-teal-900 mb-4"><i class="fas fa-book-open mr-2"></i>Diario Científico</h3>
-            <div class="space-y-4 mb-8">
-                <div><label class="block font-bold text-teal-800 mb-1">¿Qué aprendí hoy?</label><textarea id="ma" rows="3" class="w-full p-3 rounded-xl border"></textarea></div>
-                <div><label class="block font-bold text-teal-800 mb-1">¿Qué me dio dificultad?</label><textarea id="md" rows="3" class="w-full p-3 rounded-xl border"></textarea></div>
-                <div><label class="block font-bold text-teal-800 mb-1">Nueva pregunta</label><textarea id="mp" rows="2" class="w-full p-3 rounded-xl border"></textarea></div>
-                <button onclick="guardarM()" class="w-full bg-teal-600 text-white font-bold py-3 rounded-xl">Guardar</button>
-            </div>
-            <h4 class="font-bold mb-4">Mis entradas</h4>
-            ${ent.length?ent.map(e=>`<div class="bg-white rounded-xl p-4 mb-3 border border-teal-100"><div class="text-xs text-teal-500 mb-2">${e.fecha}</div><p class="font-bold">Aprendí: ${e.aprendi}</p><p class="text-sm">Dificultad: ${e.dificultad}</p>${e.nueva_pregunta?`<p class="text-sm text-purple-600">Pregunta: ${e.nueva_pregunta}</p>`:''}</div>`).join(''):'<p class="text-slate-500">Sin entradas</p>'}
-        </div>`;
-    }
-
-    async function guardarM() {
-        const a = document.getElementById('ma').value, d = document.getElementById('md').value, p = document.getElementById('mp').value;
-        if (!a || !d) return alert('Completa los campos');
-        await API.insert('metacognicion', {id:'meta_'+Date.now(),estudiante_id:state.user.estudianteId,aprendi:a,dificultad:d,nueva_pregunta:p,fecha:new Date().toISOString().split('T')[0]});
-        alert('¡Guardado!'); render();
-    }
-
-    function rBio() {
-        return `<div class="bg-green-50 rounded-2xl p-6 border border-green-200">
-            <h3 class="text-xl font-black text-green-900 mb-4"><i class="fas fa-leaf mr-2"></i>Biodiversidad</h3>
-            <div class="flex gap-2 mb-6"><input type="text" id="bs" placeholder="Buscar especie..." class="flex-1 p-3 rounded-xl border" onkeypress="if(event.key==='Enter')buscarB()"><button onclick="buscarB()" class="bg-green-600 text-white px-6 rounded-xl font-bold"><i class="fas fa-search"></i></button></div>
-            <div id="br" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"></div>
-        </div>`;
-    }
-
-    async function buscarB() {
-        const q = document.getElementById('bs').value; if (!q) return;
-        let res = await API.get('biodiversidad', `nombre LIKE '%${q}%'`);
-        if (!res.length) res = [await HF.buscarBiodiversidad(q)];
-        document.getElementById('br').innerHTML = res.map(i=>`<div class="bg-white rounded-xl p-4 border border-green-100"><h4 class="font-bold text-green-800">${i.nombre}</h4><p class="text-sm mt-2">${i.descripcion}</p></div>`).join('')||'<p>Sin resultados</p>';
+    function logout() {
+        AUTH.clear();
+        state.user = null;
+        location.hash = '#landing';
     }
 
     // ============================================
-    // VISTAS DOCENTE
+    // MAIN RENDER
     // ============================================
-    async function rd() {
-        const est = await API.get('estudiantes', `maestro_id = '${state.user?.docenteId}'`);
-        const asig = await API.get('asignaciones', `maestro_id = '${state.user?.docenteId}'`);
-        const sug = await API.get('sugerencias', `maestro_id = '${state.user?.docenteId}'`, 'fecha DESC LIMIT 5');
-        return `<div class="space-y-6">
-            <div class="bg-slate-800 rounded-3xl p-8 text-white"><h3 class="text-2xl font-black"><i class="fas fa-calendar-alt mr-2"></i>Panel</h3><p class="text-slate-300">Escuela: ${state.user?.escuela}</p></div>
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-                <div class="bg-white rounded-2xl p-6 border"><div class="text-3xl font-black text-blue-600">${est.length}</div><div class="text-slate-500">Estudiantes</div></div>
-                <div class="bg-white rounded-2xl p-6 border"><div class="text-3xl font-black text-green-600">${asig.length}</div><div class="text-slate-500">Tareas</div></div>
-                <div class="bg-white rounded-2xl p-6 border"><div class="text-3xl font-black text-purple-600">${sug.length}</div><div class="text-slate-500">Sugerencias</div></div>
-            </div>
-            <div class="bg-white rounded-2xl p-6 border"><h4 class="text-lg font-bold mb-4">Buzón de Sugerencias</h4><div class="flex gap-2"><input type="text" id="si" placeholder="Sugerencia..." class="flex-1 p-3 rounded-xl border"><button onclick="envS()" class="bg-indigo-600 text-white px-6 rounded-xl font-bold">Enviar</button></div></div>
-        </div>`;
-    }
-
-    async function envS() {
-        const t = document.getElementById('si').value; if (!t) return;
-        await API.insert('sugerencias', {id:'sug_'+Date.now(),maestro_id:state.user.docenteId,texto:t,fecha:new Date().toISOString()});
-        document.getElementById('si').value = ''; alert('Enviada');
-    }
-
-    async function rEst() {
-        const est = await API.get('estudiantes', `maestro_id = '${state.user?.docenteId}'`);
-        return `<div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
-            <div class="bg-white rounded-2xl p-6 border"><h3 class="text-xl font-bold mb-4">Agregar Estudiante</h3>
-                <div class="space-y-4"><input type="text" id="nsn" placeholder="Nombres" class="w-full p-3 rounded-xl border">
-                <select id="nsg" class="w-full p-3 rounded-xl border">${TODOS_LOS_GRADOS.map(g=>`<option value="${g}">${g}</option>`).join('')}</select>
-                <button onclick="crearE()" class="w-full bg-blue-600 text-white font-bold py-3 rounded-xl">Crear</button></div></div>
-            <div class="lg:col-span-2 bg-white rounded-2xl p-6 border"><h3 class="text-xl font-bold mb-4">Mis Estudiantes (${est.length})</h3>
-                ${est.length?`<table class="w-full text-left"><thead><tr class="bg-slate-50"><th class="p-2">Nombre</th><th class="p-2">Grado</th><th class="p-2"></th></tr></thead><tbody>${est.map(s=>`<tr class="border-b"><td class="p-2 font-bold">${s.nombre}</td><td class="p-2">${s.grado}</td><td class="p-2"><button onclick="elimE('${s.id}')" class="text-red-600"><i class="fas fa-trash"></i></button></td></tr>`).join('')}</tbody></table>`:'<p class="text-slate-500">Sin estudiantes</p>'}
-            </div></div>`;
-    }
-
-    async function crearE() {
-        const n = document.getElementById('nsn').value, g = document.getElementById('nsg').value;
-        if (!n) return alert('Ingresa nombre');
-        const u = n.toLowerCase().replace(/[^a-z]/g,'').substring(0,8);
-        const e = `${u}@estudiante.educiencias.com`, p = Math.random().toString(36).substring(2,8);
-        const uid = 'est_'+Date.now();
-        await API.insert('perfiles', {id:uid,email:e,password:p,rol:'estudiante',nombre:n});
-        await API.insert('estudiantes', {id:uid,user_id:uid,nombre:n,grado:g,maestro_id:state.user.docenteId});
-        alert(`Creado!\nEmail: ${e}\nPassword: ${p}`); render();
-    }
-
-    async function elimE(id) { if(confirm('¿Eliminar?')) { await API.delete('estudiantes', id); render(); } }
-
-    async function rAsig() {
-        const a = await API.get('asignaciones', `maestro_id = '${state.user?.docenteId}'`, 'created_at DESC');
-        return `<div class="bg-white rounded-2xl p-6 border">
-            <h3 class="text-xl font-bold mb-4">Crear Tarea</h3>
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-                <input type="text" id="at" placeholder="Título" class="p-3 rounded-xl border">
-                <select id="ag" class="p-3 rounded-xl border">${TODOS_LOS_GRADOS.map(g=>`<option value="${g}">${g}</option>`).join('')}</select>
-                <select id="atp" class="p-3 rounded-xl border"><option value="tarea">Tarea</option><option value="laboratorio">Laboratorio</option></select>
-                <input type="number" id="ap" value="100" class="p-3 rounded-xl border">
-                <input type="date" id="av" class="p-3 rounded-xl border">
-                <textarea id="ad" placeholder="Descripción" rows="2" class="p-3 rounded-xl border md:col-span-2"></textarea>
-                <button onclick="crearA()" class="bg-blue-600 text-white font-bold py-3 rounded-xl md:col-span-2">Crear</button>
-            </div>
-            <h4 class="font-bold mb-4">Tareas Creadas</h4>
-            ${a.length?a.map(x=>`<div class="p-4 bg-slate-50 rounded-xl mb-2"><div class="font-bold">${x.titulo} <span class="text-xs px-2 py-1 rounded ${x.tipo==='laboratorio'?'bg-emerald-100':'bg-blue-100'}">${x.tipo}</span></div><div class="text-sm text-slate-500">${x.grado}</div></div>`).join(''):'<p class="text-slate-500">Sin tareas</p>'}
-        </div>`;
-    }
-
-    async function crearA() {
-        await API.insert('asignaciones', {id:'asig_'+Date.now(),maestro_id:state.user.docenteId,titulo:document.getElementById('at').value,grado:document.getElementById('ag').value,tipo:document.getElementById('atp').value,descripcion:document.getElementById('ad').value,valor_puntos:parseInt(document.getElementById('ap').value),fecha_vencimiento:document.getElementById('av').value,activa:1});
-        alert('Creada'); render();
-    }
-
-    async function rEval() {
-        return `<div class="bg-white rounded-2xl p-6 border">
-            <h3 class="text-xl font-bold mb-4">Generar Quiz con IA</h3>
-            <div class="flex gap-4"><input type="text" id="qt" placeholder="Tema" class="flex-1 p-3 rounded-xl border"><select id="qg" class="p-3 rounded-xl border">${TODOS_LOS_GRADOS.map(g=>`<option value="${g}">${g}</option>`).join('')}</select><button onclick="genQ()" class="bg-orange-500 text-white font-bold px-6 rounded-xl">Generar</button></div>
-            <div id="qp" class="hidden mt-4 p-4 bg-slate-50 rounded-xl"></div>
-        </div>`;
-    }
-
-    async function genQ() {
-        const r = await HF.generarQuiz(document.getElementById('qt').value, document.getElementById('qg').value);
-        const p = document.getElementById('qp'); p.classList.remove('hidden');
-        if (r.preguntas) { state.data.quiz = r; p.innerHTML = `<h4 class="font-bold mb-2">${r.titulo}</h4>${r.preguntas.map((q,i)=>`<div class="mb-2 p-2 bg-white rounded"><p class="font-bold">${i+1}. ${q.pregunta}</p><p class="text-sm text-green-600">✓ ${q.respuesta}</p></div>`).join('')}<button onclick="guardarQ()" class="mt-4 bg-green-600 text-white font-bold px-6 py-2 rounded-xl">Guardar</button>`; }
-        else { p.innerHTML = `<p class="text-red-500">${r.error}</p>`; }
-    }
-
-    async function guardarQ() {
-        await API.insert('evaluaciones', {id:'eval_'+Date.now(),maestro_id:state.user.docenteId,titulo:state.data.quiz.titulo,preguntas:JSON.stringify(state.data.quiz.preguntas),grado:document.getElementById('qg').value,activa:1});
-        alert('Guardado'); render();
-    }
-
-    async function rProy() {
-        return `<div class="bg-white rounded-2xl p-6 border">
-            <h3 class="text-xl font-bold mb-4">Proyecto STEAM</h3>
-            <div class="space-y-4">
-                <input type="text" id="pt" placeholder="Título" class="w-full p-3 rounded-xl border">
-                <input type="text" id="pas" placeholder="Asignatura" class="w-full p-3 rounded-xl border">
-                <textarea id="ptm" placeholder="Tema" rows="3" class="w-full p-3 rounded-xl border"></textarea>
-                <div class="flex gap-2">${['S','T','E','A','M'].map(m=>`<label class="cursor-pointer px-3 py-2 rounded-lg border text-sm font-bold"><input type="checkbox" value="${m}" class="sc hidden"> ${m}</label>`).join('')}</div>
-                <button onclick="genP()" class="w-full bg-purple-600 text-white font-bold py-3 rounded-xl">Generar con IA</button>
-            </div>
-            <div id="pp" class="hidden mt-6 p-4 bg-slate-50 rounded-xl"></div>
-        </div>`;
-    }
-
-    async function genP() {
-        const s = {}; document.querySelectorAll('.sc').forEach(c => s[c.value] = c.checked);
-        const r = await HF.generarProyecto(document.getElementById('pt').value, s, document.getElementById('ptm').value);
-        const p = document.getElementById('pp'); p.classList.remove('hidden');
-        if (r.resumen) { state.data.proy = r; p.innerHTML = `<h4 class="font-bold">${r.resumen}</h4><button onclick="guardarP()" class="mt-4 bg-green-600 text-white font-bold px-6 py-2 rounded-xl">Guardar</button>`; }
-    }
-
-    async function guardarP() {
-        await API.insert('proyectos_steam', {id:'proy_'+Date.now(),maestro_id:state.user.docenteId,titulo:state.data.proy.titulo,resumen:state.data.proy.resumen,materiales:JSON.stringify(state.data.proy.materiales||[]),fases:JSON.stringify(state.data.proy.fases||[])});
-        alert('Guardado');
-    }
-
-    function rSim() {
-        return `<div class="bg-slate-800 rounded-3xl p-8 text-white"><h2 class="text-2xl font-black"><i class="fas fa-robot mr-2"></i>Simulador IA</h2><textarea id="sp" rows="3" placeholder="Describe..." class="w-full p-4 rounded-xl text-slate-800 mb-4"></textarea><button onclick="genS()" class="bg-indigo-500 px-8 py-3 rounded-xl font-bold">Crear</button><div id="spr" class="mt-6"></div></div><div class="bg-white rounded-2xl p-6 border mt-6"><p class="text-slate-500 text-center py-8">📡 Próximamente simulaciones de otros</p></div>`;
-    }
-
-    async function genS() {
-        const r = await HF.generarSimulacion(document.getElementById('sp').value);
-        document.getElementById('spr').innerHTML = r.html ? `<iframe srcdoc="${r.html}" class="w-full h-96 border-4 border-slate-600 rounded-xl"></iframe>` : '<p class="text-red-400">Error</p>';
-    }
-
-    async function rForo() {
-        const p = await API.get('foro_docentes', '', 'fecha DESC');
-        return `<div class="space-y-6"><div class="bg-white rounded-2xl p-6 border"><h3 class="text-xl font-bold mb-4">Nueva Publicación</h3><div class="space-y-4"><input type="text" id="ft" placeholder="Título" class="w-full p-3 rounded-xl border"><textarea id="fc" placeholder="Contenido" rows="3" class="w-full p-3 rounded-xl border"></textarea><button onclick="crearF()" class="bg-blue-600 text-white font-bold px-6 py-2 rounded-xl">Publicar</button></div></div><div class="bg-white rounded-2xl p-6 border"><h3 class="text-xl font-bold mb-4">Comunidad</h3>${p.length?p.map(x=>`<div class="p-4 bg-slate-50 rounded-xl mb-3"><h4 class="font-bold">${x.titulo}</h4><p class="text-sm text-slate-600">${x.contenido}</p><div class="text-xs text-slate-400">${x.fecha}</div></div>`).join(''):'<p class="text-slate-500">Sin publicaciones</p>'}</div></div>`;
-    }
-
-    async function crearF() {
-        await API.insert('foro_docentes', {id:'foro_'+Date.now(),maestro_id:state.user.docenteId,titulo:document.getElementById('ft').value,contenido:document.getElementById('fc').value,fecha:new Date().toISOString()});
-        render();
-    }
-
-    function rPerf() {
-        return `<div class="bg-white rounded-2xl p-6 border max-w-2xl"><h3 class="text-xl font-bold mb-6"><i class="fas fa-user mr-2"></i>Mi Perfil</h3><div class="space-y-4"><div><label class="block text-sm font-bold mb-1">Nombre</label><input type="text" id="pn" value="${state.user?.nombre||''}" class="w-full p-3 rounded-xl border"></div><button onclick="guardarPf()" class="bg-blue-600 text-white font-bold px-6 py-2 rounded-xl">Guardar</button></div></div>`;
-    }
-
-    async function guardarPf() {
-        await API.update('perfiles', state.user.id, {nombre: document.getElementById('pn').value});
-        state.user.nombre = document.getElementById('pn').value; AUTH.save(state.user); alert('Actualizado');
-    }
-
-    // ============================================
-    // VISTAS ADMIN
-    // ============================================
-    async function ra() {
-        const e = await API.query("SELECT COUNT(*) as c FROM estudiantes");
-        const d = await API.query("SELECT COUNT(*) as c FROM docentes");
-        const a = await API.query("SELECT COUNT(*) as c FROM asignaciones");
-        const ent = await API.query("SELECT COUNT(*) as c FROM entregas");
-        return `<div class="space-y-6">
-            <div class="grid grid-cols-2 md:grid-cols-5 gap-4">
-                <div class="bg-white rounded-2xl p-6 border"><div class="text-3xl font-black text-blue-600">${e[0]?.c||0}</div><div class="text-slate-500">Estudiantes</div></div>
-                <div class="bg-white rounded-2xl p-6 border"><div class="text-3xl font-black text-green-600">${d[0]?.c||0}</div><div class="text-slate-500">Docentes</div></div>
-                <div class="bg-white rounded-2xl p-6 border"><div class="text-3xl font-black text-purple-600">${a[0]?.c||0}</div><div class="text-slate-500">Tareas</div></div>
-                <div class="bg-white rounded-2xl p-6 border"><div class="text-3xl font-black text-orange-600">${ent[0]?.c||0}</div><div class="text-slate-500">Entregas</div></div>
-            </div>
-        </div>`;
-    }
-
-    async function rSug() {
-        const s = await API.get('sugerencias', '', 'fecha DESC');
-        return `<div class="bg-white rounded-2xl p-6 border"><h3 class="text-xl font-bold mb-4">Sugerencias</h3>${s.length?s.map(x=>`<div class="p-4 bg-slate-50 rounded-xl mb-3"><div class="flex justify-between"><span class="font-bold">${x.maestro_id}</span><span class="text-xs text-slate-400">${x.fecha}</span></div><p class="text-slate-700 mt-2">${x.texto}</p>${x.respuesta?`<p class="text-green-600 mt-2">✓ ${x.respuesta}</p>`:`<div class="mt-2 flex gap-2"><input type="text" id="rs-${x.id}" placeholder="Responder..." class="flex-1 p-2 rounded border text-sm"><button onclick="respS('${x.id}')" class="bg-green-600 text-white px-3 py-1 rounded text-sm">Responder</button></div>`}</div>`).join(''):'<p class="text-slate-500">Sin sugerencias</p>'}</div>`;
-    }
-
-    async function respS(id) {
-        await API.update('sugerencias', id, {respuesta: document.getElementById('rs-'+id).value, procesada: 1});
-        render();
-    }
-
-    async function rLogs() {
-        const l = await API.get('logs', '', 'fecha DESC LIMIT 100');
-        return `<div class="bg-white rounded-2xl p-6 border"><h3 class="text-xl font-bold mb-4">Logs</h3><div class="overflow-x-auto"><table class="w-full text-sm"><thead><tr class="bg-slate-50"><th class="p-2 text-left">Fecha</th><th class="p-2 text-left">Rol</th><th class="p-2 text-left">Usuario</th><th class="p-2 text-left">Acción</th></tr></thead><tbody>${l.length?l.map(x=>`<tr class="border-b"><td class="p-2">${x.fecha}</td><td class="p-2"><span class="bg-slate-100 px-2 py-1 rounded text-xs">${x.rol}</span></td><td class="p-2">${x.usuario}</td><td class="p-2">${x.accion}</td></tr>`).join(''):'<tr><td colspan="4" class="p-4 text-center">Sin logs</td></tr>'}</tbody></table></div></div>`;
-    }
-
-    async function rConf() {
-        const s = await API.get('settings');
-        const c = {}; s.forEach(x => c[x.clave] = x.valor);
-        return `<div class="bg-white rounded-2xl p-6 border max-w-2xl"><h3 class="text-xl font-bold mb-4">Configuración</h3><div class="flex items-center justify-between p-4 bg-slate-50 rounded-xl"><div><div class="font-bold">Modo Mantenimiento</div></div><button onclick="toggleM('${c.maintenance_mode}')" class="bg-red-600 text-white px-4 py-2 rounded-lg font-bold">${c.maintenance_mode==='true'?'Desactivar':'Activar'}</button></div></div>`;
-    }
-
-    async function toggleM(actual) {
-        await API.update('settings', 'maintenance_mode', {valor: actual === 'true' ? 'false' : 'true'});
-        render();
+    function render() {
+        const app = document.getElementById('app');
+        const view = router();
+        
+        if (view === 'landing') app.innerHTML = renderLanding();
+        else if (view === 'registro') app.innerHTML = renderRegistro();
+        else if (view === 'login') app.innerHTML = renderLogin();
+        else if (view === 'dashboard') app.innerHTML = renderDashboard();
+        
+        initScrollObserver();
     }
 
     // ============================================
     // INIT
     // ============================================
-    async function init() {
-        const saved = AUTH.get();
-        if (saved) { state.user = saved; state.view = 'dashboard'; }
-        render();
+    window.addEventListener('hashchange', render);
+    
+    const saved = AUTH.get();
+    if (saved) {
+        state.user = saved;
+        location.hash = '#dashboard';
     }
-
-    init();
+    
+    render();
     </script>
 </body>
 </html>
