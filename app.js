@@ -274,10 +274,10 @@ async function renderAdmin() {
             <div class="bg-white p-6 rounded-2xl shadow mb-8">
                 <h2 class="text-xl font-bold mb-4"><i class="fas fa-user-shield mr-2"></i>Gestión de Maestros</h2>
                 <div class="space-y-2 max-h-80 overflow-y-auto">
-                    ${doc.length ? doc.map(d => {
+                    ${doc.filter(d => d.estado !== 'deleted').length ? doc.filter(d => d.estado !== 'deleted').map(d => {
                         const estado = d.estado || 'active';
-                        const estadoColor = estado === 'active' ? 'bg-green-100 text-green-700' : estado === 'revision' ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-700';
-                        const estadoLabel = estado === 'active' ? 'Activo' : estado === 'revision' ? 'En revisión' : 'Eliminado';
+                        const estadoColor = estado === 'active' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700';
+                        const estadoLabel = estado === 'active' ? 'Activo' : 'En revisión';
                         return `<div class="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
                             <div class="flex items-center gap-3">
                                 <span class="px-2 py-1 rounded text-xs font-bold ${estadoColor}">${estadoLabel}</span>
@@ -287,11 +287,9 @@ async function renderAdmin() {
                                 </div>
                             </div>
                             <div class="flex gap-2">
-                                ${estado !== 'deleted' ? `
-                                    <button onclick="setUserStatus('${d.id}', 'revision')" class="bg-yellow-500 text-white px-3 py-1 rounded text-xs" title="Poner en revisión">⚠️</button>
-                                    <button onclick="confirmarEliminarMaestro('${d.id}', '${d.nombre}')" class="bg-red-600 text-white px-3 py-1 rounded text-xs" title="Eliminar cuenta">🗑️</button>
-                                    <button onclick="setUserStatus('${d.id}', 'active')" class="bg-green-600 text-white px-3 py-1 rounded text-xs" title="Activar">✓</button>
-                                ` : ''}
+                                <button onclick="setUserStatus('${d.id}', 'revision')" class="bg-yellow-500 text-white px-3 py-1 rounded text-xs" title="Poner en revisión">⚠️</button>
+                                <button onclick="confirmarEliminarMaestro('${d.id}', '${d.nombre}')" class="bg-red-600 text-white px-3 py-1 rounded text-xs" title="Eliminar cuenta">🗑️</button>
+                                <button onclick="setUserStatus('${d.id}', 'active')" class="bg-green-600 text-white px-3 py-1 rounded text-xs" title="Activar">✓</button>
                             </div>
                         </div>`;
                     }).join('') : '<p class="text-slate-500">No hay maestros</p>'}
