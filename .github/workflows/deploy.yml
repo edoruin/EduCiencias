@@ -25,6 +25,10 @@ jobs:
       - name: Setup Pages
         uses: actions/configure-pages@v4
 
+      - name: Inject API URL
+        run: |
+          sed -i 's|PON_TU_URL_DEL_WORKER_AQUI|${{ secrets.D1_API_URL }}|g' config.js
+
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
