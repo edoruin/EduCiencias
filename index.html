@@ -65,8 +65,8 @@
     // AUTH
     // ============================================
     const AUTH = {
-        async login(email, password) {
-            const result = await API.request('/auth/login', { method: 'POST', body: { email, password } });
+        async login(username, password) {
+            const result = await API.request('/auth/login', { method: 'POST', body: { email: username, password } });
             return result?.user || null;
         },
         async register(email, password, nombre, rol, extras = {}) {
@@ -191,11 +191,14 @@
                 </div>
                 <div id="le-mensaje" class="hidden bg-red-50 text-red-600 p-3 rounded-xl text-sm mb-4 text-center"></div>
                 <form onsubmit="event.preventDefault();" class="space-y-4">
-                    <div><label class="block text-sm font-bold mb-1">Email</label><input type="email" id="lem" required class="w-full px-4 py-3 rounded-xl border"></div>
+                    <div><label class="block text-sm font-bold mb-1">Usuario</label><input type="text" id="lem" required class="w-full px-4 py-3 rounded-xl border" placeholder="admin, profe@demo.com, etc."></div>
                     <div><label class="block text-sm font-bold mb-1">Contraseña</label><input type="password" id="lpw" required class="w-full px-4 py-3 rounded-xl border"></div>
                     <button onclick="login()" class="w-full bg-green-600 text-white font-bold py-3 rounded-xl">Ingresar</button>
                 </form>
-                <p class="text-center mt-4 text-slate-500">¿Nuevo docente? <button onclick="location.hash='#registro'" class="text-green-600 font-bold">Registrarse</button></p>
+                <div class="mt-4 text-center text-sm text-slate-500">
+                    <p>¿Nuevo docente? <button onclick="location.hash='#registro'" class="text-green-600 font-bold">Registrarse</button></p>
+                    <p class="mt-2 text-xs">Demo: profe@demo.com / profe123</p>
+                </div>
             </div></div>`;
     }
 
