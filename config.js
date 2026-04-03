@@ -1,8 +1,7 @@
 // CONFIGURACIÓN - EduCiencias
-// Reemplaza la URL del worker después de desplegar en Cloudflare
 window.EDUCIENCIAS_CONFIG = {
-    // URL del Worker desplegado en Cloudflare (ej: https://educiencias-api.tu-cuenta.workers.dev)
-    d1ApiUrl: window.D1_API_URL || 'PON_TU_URL_DEL_WORKER_AQUI',
+    // URL del Worker desplegado en Cloudflare
+    d1ApiUrl: 'https://educiencias.edwinjeremiasagustinyack.workers.dev',
     d1ApiKey: window.D1_API_KEY || 'dev-token',
     
     // Token de HuggingFace (opcional)
