@@ -436,7 +436,7 @@
                     </div>
                 </div>
             </div>
-            <script>
+            <` + `script>
                 // Gráficos
                 setTimeout(() => {
                     // Estudiantes por grado
@@ -451,7 +451,7 @@
                     const ctx3 = document.getElementById('chartEntregas');
                     if (ctx3) new Chart(ctx3, { type: 'line', data: { labels: Object.keys(${JSON.stringify(entPorMes)}), datasets: [{ label: 'Entregas', data: Object.values(${JSON.stringify(entPorMes)}), borderColor: '#8b5cf6', tension: 0.4 }] }, options: { responsive: true, plugins: { legend: { display: false } } } });
                 }, 100);
-            </script>
+            <` + `/script>
         </div>`;
     }
 
