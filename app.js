@@ -482,16 +482,18 @@ async function renderDocente() {
     const sug = await API.get('sugerencias');
     const misEst = est.filter(e => e.maestro_id === state.user?.docenteId);
     const misAsig = asig.filter(a => a.maestro_id === state.user?.docenteId);
+    const currentView = state.data.view || 'panel';
     
     return `<div class="min-h-screen bg-slate-50">
         <nav class="bg-slate-800 text-white px-6 py-4 flex justify-between items-center">
             <div class="flex items-center gap-2"><i class="fas fa-flask text-green-400"></i><span class="font-black">EduCiencias</span></div>
             <div class="flex items-center gap-4">
-                <button onclick="navD('panel')" class="text-white hover:text-green-400">Panel</button>
-                <button onclick="navD('estudiantes')" class="text-white hover:text-green-400">Estudiantes</button>
-                <button onclick="navD('asignaciones')" class="text-white hover:text-green-400">Tareas</button>
-                <button onclick="navD('sugerencias')" class="text-white hover:text-green-400">Sugerencias</button>
-                <button onclick="navD('perfil')" class="text-white hover:text-green-400">Perfil</button>
+                <button onclick="navD('panel')" class="text-white hover:text-green-400 ${currentView === 'panel' ? 'text-green-400' : ''}">Panel</button>
+                <button onclick="navD('calendario')" class="text-white hover:text-green-400 ${currentView === 'calendario' ? 'text-green-400' : ''}">Calendario</button>
+                <button onclick="navD('estudiantes')" class="text-white hover:text-green-400 ${currentView === 'estudiantes' ? 'text-green-400' : ''}">Estudiantes</button>
+                <button onclick="navD('asignaciones')" class="text-white hover:text-green-400 ${currentView === 'asignaciones' ? 'text-green-400' : ''}">Tareas</button>
+                <button onclick="navD('sugerencias')" class="text-white hover:text-green-400 ${currentView === 'sugerencias' ? 'text-green-400' : ''}">Sugerencias</button>
+                <button onclick="navD('perfil')" class="text-white hover:text-green-400 ${currentView === 'perfil' ? 'text-green-400' : ''}">Perfil</button>
                 <button onclick="logout()" class="text-red-400 font-bold">Salir</button>
             </div>
         </nav>
@@ -501,46 +503,12 @@ async function renderDocente() {
                 <p class="opacity-80">${state.user?.escuela}</p>
             </div>
             
-            <div class="grid grid-cols-3 gap-4 mb-8">
-                <div class="bg-white p-6 rounded-2xl shadow text-center"><div class="text-4xl font-black text-blue-600">${misEst.length}</div><div class="text-slate-500">Estudiantes</div></div>
-                <div class="bg-white p-6 rounded-2xl shadow text-center"><div class="text-4xl font-black text-green-600">${misAsig.length}</div><div class="text-slate-500">Tareas Creadas</div></div>
-                <div class="bg-white p-6 rounded-2xl shadow text-center"><div class="text-4xl font-black text-purple-600">${sug.length}</div><div class="text-slate-500">Sugerencias Enviadas</div></div>
-            </div>
-
-            <div class="bg-white p-6 rounded-2xl shadow mb-8">
-                <h2 class="text-xl font-bold mb-4"><i class="fas fa-users mr-2"></i>Mis Estudiantes</h2>
-                <div class="grid md:grid-cols-3 gap-4 mb-4">
-                    <input type="text" id="nsn" placeholder="Nombre del estudiante" class="p-3 border rounded-xl">
-                    <select id="nsg" class="p-3 border rounded-xl">${TODOS_LOS_GRADOS.map(g=>`<option value="${g}">${g}</option>`).join('')}</select>
-                    <button onclick="crearEstudiante()" class="bg-blue-600 text-white font-bold py-3 rounded-xl">Agregar</button>
-                </div>
-                <div class="overflow-x-auto">
-                    <table class="w-full text-left"><thead class="bg-slate-50"><tr><th class="p-3">Nombre</th><th class="p-3">Grado</th><th class="p-3">Acciones</th></tr></thead>
-                    <tbody>${misEst.length ? misEst.map(e => `<tr class="border-b"><td class="p-3 font-bold">${e.nombre}</td><td class="p-3">${e.grado}</td><td class="p-3"><button onclick="elimEst('${e.id}')" class="text-red-600"><i class="fas fa-trash"></i></button></td></tr>`).join('') : '<tr><td colspan="3" class="p-4 text-center">Sin estudiantes</td></tr>'}</tbody></table>
-                </div>
-            </div>
-
-            <div class="bg-white p-6 rounded-2xl shadow mb-8">
-                <h2 class="text-xl font-bold mb-4"><i class="fas fa-tasks mr-2"></i>Crear Tarea</h2>
-                <div class="grid md:grid-cols-2 gap-4 mb-4">
-                    <input type="text" id="at" placeholder="Título de la tarea" class="p-3 border rounded-xl">
-                    <select id="ag" class="p-3 border rounded-xl">${TODOS_LOS_GRADOS.map(g=>`<option value="${g}">${g}</option>`).join('')}</select>
-                    <select id="atp" class="p-3 border rounded-xl"><option value="tarea">Tarea Clásica</option><option value="laboratorio">Laboratorio</option></select>
-                    <input type="number" id="ap" value="100" placeholder="Puntos" class="p-3 border rounded-xl">
-                    <input type="date" id="av" class="p-3 border rounded-xl">
-                    <input type="text" id="afase" placeholder="Fase 5E (opcional)" class="p-3 border rounded-xl">
-                </div>
-                <textarea id="ad" placeholder="Descripción de la tarea" rows="2" class="w-full p-3 border rounded-xl mb-4"></textarea>
-                <button onclick="crearTarea()" class="bg-green-600 text-white font-bold py-3 px-8 rounded-xl">Crear Tarea</button>
-            </div>
-
-            <div class="bg-white p-6 rounded-2xl shadow">
-                <h2 class="text-xl font-bold mb-4"><i class="fas fa-envelope mr-2"></i>Enviar Sugerencia al Admin</h2>
-                <div class="flex gap-4">
-                    <input type="text" id="si" placeholder="Tu sugerencia..." class="flex-1 p-3 border rounded-xl">
-                    <button onclick="enviarSugerencia()" class="bg-indigo-600 text-white font-bold px-6 py-3 rounded-xl">Enviar</button>
-                </div>
-            </div>
+            ${currentView === 'panel' ? renderDocentePanel(misEst, misAsig, sug) : ''}
+            ${currentView === 'calendario' ? renderDocenteCalendario(misAsig) : ''}
+            ${currentView === 'estudiantes' ? renderDocenteEstudiantes(misEst) : ''}
+            ${currentView === 'asignaciones' ? renderDocenteTareas(misAsig) : ''}
+            ${currentView === 'sugerencias' ? renderDocenteSugerencias(sug) : ''}
+            ${currentView === 'perfil' ? renderDocentePerfil() : ''}
         </div>
     </div>`;
 }
@@ -568,6 +536,146 @@ async function enviarSugerencia() {
 }
 
 function navD(view) { state.data.view = view; render(); }
+
+// ============================================
+// DOCENTE VISTAS
+// ============================================
+function renderDocentePanel(misEst, misAsig, sug) {
+    return `<div class="grid grid-cols-3 gap-4 mb-8">
+        <div class="bg-white p-6 rounded-2xl shadow text-center"><div class="text-4xl font-black text-blue-600">${misEst.length}</div><div class="text-slate-500">Estudiantes</div></div>
+        <div class="bg-white p-6 rounded-2xl shadow text-center"><div class="text-4xl font-black text-green-600">${misAsig.length}</div><div class="text-slate-500">Tareas Creadas</div></div>
+        <div class="bg-white p-6 rounded-2xl shadow text-center"><div class="text-4xl font-black text-purple-600">${sug.length}</div><div class="text-slate-500">Sugerencias Enviadas</div></div>
+    </div>`;
+}
+
+function renderDocenteCalendario(misAsig) {
+    const now = new Date();
+    const upcoming = misAsig
+        .filter(a => a.fecha_vencimiento)
+        .filter(a => new Date(a.fecha_vencimiento) >= now)
+        .sort((a, b) => new Date(a.fecha_vencimiento) - new Date(b.fecha_vencimiento))
+        .slice(0, 10);
+    
+    const past = misAsig
+        .filter(a => a.fecha_vencimiento)
+        .filter(a => new Date(a.fecha_vencimiento) < now)
+        .sort((a, b) => new Date(b.fecha_vencimiento) - new Date(a.fecha_vencimiento))
+        .slice(0, 10);
+    
+    const days = ['Domingo','Lunes','Martes','Miércoles','Jueves','Viernes','Sábado'];
+    const months = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
+    
+    return `<div class="grid md:grid-cols-2 gap-8">
+        <div class="bg-white p-6 rounded-2xl shadow">
+            <h2 class="text-xl font-bold mb-4"><i class="fas fa-clock mr-2 text-orange-500"></i>Próximos Vencimientos</h2>
+            ${upcoming.length ? upcoming.map(a => {
+                const d = new Date(a.fecha_vencimiento);
+                return `<div class="p-4 bg-orange-50 rounded-xl mb-2 flex justify-between items-center">
+                    <div>
+                        <div class="font-bold">${a.titulo}</div>
+                        <div class="text-sm text-slate-500">${a.grado} • ${a.tipo === 'laboratorio' ? '🧪' : '📝'}</div>
+                    </div>
+                    <div class="text-right">
+                        <div class="text-orange-600 font-bold">${days[d.getDay()]}</div>
+                        <div class="text-sm text-slate-500">${d.getDate()} ${months[d.getMonth()]}</div>
+                    </div>
+                </div>`;
+            }).join('') : '<p class="text-slate-500 text-center py-8">No hay tareas próximas</p>'}
+        </div>
+        <div class="bg-white p-6 rounded-2xl shadow">
+            <h2 class="text-xl font-bold mb-4"><i class="fas fa-history mr-2 text-slate-500"></i>Historial</h2>
+            ${past.length ? past.map(a => {
+                const d = new Date(a.fecha_vencimiento);
+                return `<div class="p-4 bg-slate-50 rounded-xl mb-2 flex justify-between items-center">
+                    <div>
+                        <div class="font-bold">${a.titulo}</div>
+                        <div class="text-sm text-slate-500">${a.grado}</div>
+                    </div>
+                    <div class="text-right text-slate-400">
+                        <div class="text-sm">${d.getDate()} ${months[d.getMonth()]}</div>
+                    </div>
+                </div>`;
+            }).join('') : '<p class="text-slate-500 text-center py-8">Sin historial</p>'}
+        </div>
+    </div>`;
+}
+
+function renderDocenteEstudiantes(misEst) {
+    return `<div class="bg-white p-6 rounded-2xl shadow mb-8">
+        <h2 class="text-xl font-bold mb-4"><i class="fas fa-users mr-2"></i>Mis Estudiantes</h2>
+        <div class="grid md:grid-cols-3 gap-4 mb-4">
+            <input type="text" id="nsn" placeholder="Nombre del estudiante" class="p-3 border rounded-xl">
+            <select id="nsg" class="p-3 border rounded-xl">${TODOS_LOS_GRADOS.map(g=>`<option value="${g}">${g}</option>`).join('')}</select>
+            <button onclick="crearEstudiante()" class="bg-blue-600 text-white font-bold py-3 rounded-xl">Agregar</button>
+        </div>
+        <div class="overflow-x-auto">
+            <table class="w-full text-left"><thead class="bg-slate-50"><tr><th class="p-3">Nombre</th><th class="p-3">Grado</th><th class="p-3">Acciones</th></tr></thead>
+            <tbody>${misEst.length ? misEst.map(e => `<tr class="border-b"><td class="p-3 font-bold">${e.nombre}</td><td class="p-3">${e.grado}</td><td class="p-3"><button onclick="elimEst('${e.id}')" class="text-red-600"><i class="fas fa-trash"></i></button></td></tr>`).join('') : '<tr><td colspan="3" class="p-4 text-center">Sin estudiantes</td></tr>'}</tbody></table>
+        </div>
+    </div>`;
+}
+
+function renderDocenteTareas(misAsig) {
+    return `<div class="bg-white p-6 rounded-2xl shadow mb-8">
+        <h2 class="text-xl font-bold mb-4"><i class="fas fa-tasks mr-2"></i>Crear Tarea</h2>
+        <div class="grid md:grid-cols-2 gap-4 mb-4">
+            <input type="text" id="at" placeholder="Título de la tarea" class="p-3 border rounded-xl">
+            <select id="ag" class="p-3 border rounded-xl">${TODOS_LOS_GRADOS.map(g=>`<option value="${g}">${g}</option>`).join('')}</select>
+            <select id="atp" class="p-3 border rounded-xl"><option value="tarea">Tarea Clásica</option><option value="laboratorio">Laboratorio</option></select>
+            <input type="number" id="ap" value="100" placeholder="Puntos" class="p-3 border rounded-xl">
+            <input type="date" id="av" class="p-3 border rounded-xl">
+            <input type="text" id="afase" placeholder="Fase 5E (opcional)" class="p-3 border rounded-xl">
+        </div>
+        <textarea id="ad" placeholder="Descripción de la tarea" rows="2" class="w-full p-3 border rounded-xl mb-4"></textarea>
+        <button onclick="crearTarea()" class="bg-green-600 text-white font-bold py-3 px-8 rounded-xl">Crear Tarea</button>
+    </div>`;
+}
+
+function renderDocenteSugerencias(sug) {
+    const misSug = sug.filter(s => s.maestro_id === state.user?.docenteId);
+    return `<div class="bg-white p-6 rounded-2xl shadow">
+        <h2 class="text-xl font-bold mb-4"><i class="fas fa-envelope mr-2"></i>Buzón de Sugerencias</h2>
+        <div class="mb-6">
+            <textarea id="si" placeholder="Escribe tu sugerencia para el administrador..." rows="3" class="w-full p-3 border rounded-xl mb-2"></textarea>
+            <button onclick="enviarSugerencia()" class="bg-indigo-600 text-white font-bold px-6 py-2 rounded-xl">Enviar</button>
+        </div>
+        <h3 class="font-bold mb-4">Historial de Sugerencias</h3>
+        <div class="space-y-3 max-h-96 overflow-y-auto">
+            ${misSug.length ? misSug.map(s => `<div class="p-4 bg-slate-50 rounded-xl border-l-4 ${s.procesada ? 'border-green-500' : 'border-orange-500'}">
+                <div class="flex justify-between items-start mb-2">
+                    <span class="text-xs text-slate-400">${s.fecha?.slice(0,10)}</span>
+                    <span class="px-2 py-1 rounded text-xs font-bold ${s.procesada ? 'bg-green-100 text-green-700' : 'bg-orange-100 text-orange-700'}">${s.procesada ? 'Respondida' : 'Pendiente'}</span>
+                </div>
+                <p class="text-sm mb-2">${s.texto}</p>
+                ${s.respuesta ? `<div class="bg-blue-50 p-2 rounded text-blue-700 text-sm"><i class="fas fa-reply mr-1"></i>${s.respuesta}</div>` : ''}
+            </div>`).join('') : '<p class="text-slate-500 text-center py-8">No has enviado sugerencias</p>'}
+        </div>
+    </div>`;
+}
+
+function renderDocentePerfil() {
+    return `<div class="bg-white p-6 rounded-2xl shadow">
+        <h2 class="text-xl font-bold mb-4"><i class="fas fa-user mr-2"></i>Mi Perfil</h2>
+        <div class="grid md:grid-cols-2 gap-6">
+            <div>
+                <label class="block text-sm font-bold mb-1">Nombre</label>
+                <div class="p-3 bg-slate-50 rounded-xl">${state.user?.nombre}</div>
+            </div>
+            <div>
+                <label class="block text-sm font-bold mb-1">Email</label>
+                <div class="p-3 bg-slate-50 rounded-xl">${state.user?.email}</div>
+            </div>
+            <div>
+                <label class="block text-sm font-bold mb-1">Escuela</label>
+                <div class="p-3 bg-slate-50 rounded-xl">${state.user?.escuela}</div>
+            </div>
+            <div>
+                <label class="block text-sm font-bold mb-1">Grados Asignados</label>
+                <div class="p-3 bg-slate-50 rounded-xl">${(state.user?.grados || []).join(', ')}</div>
+            </div>
+        </div>
+    </div>`;
+}
 
 // ============================================
 // ESTUDIANTE DASHBOARD
