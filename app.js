@@ -3,7 +3,8 @@
 // ============================================
 const ROUTES = {
     '': 'landing', '#landing': 'landing', '#registro': 'registro', '#login': 'login',
-    '#dashboard': 'dashboard', '#admin': 'admin', '#docente': 'docente', '#estudiante': 'estudiante'
+    '#dashboard': 'dashboard', '#admin': 'admin', '#docente': 'docente', '#estudiante': 'estudiante',
+    '#mantenimiento': 'mantenimiento'
 };
 function router() { return ROUTES[window.location.hash] || 'landing'; }
 
@@ -166,10 +167,27 @@ function renderLogin() {
 }
 
 async function login() {
+    const sets = await API.get('settings');
+    const maintMode = sets.find(s => s.clave === 'maintenance_mode')?.valor === 'true';
+    
     const u = document.getElementById('lem').value, p = document.getElementById('lpw').value;
     const user = await AUTH.login(u, p);
-    if (user) { state.user = user; AUTH.save(user); goToDashboard(); }
-    else { document.getElementById('le-mensaje').textContent = 'Credenciales incorrectas'; document.getElementById('le-mensaje').classList.remove('hidden'); }
+    
+    if (user) {
+        if (maintMode && user.rol !== 'admin') {
+            state.user = user;
+            AUTH.save(user);
+            location.hash = '#mantenimiento';
+            render();
+            return;
+        }
+        state.user = user;
+        AUTH.save(user);
+        goToDashboard();
+    } else {
+        document.getElementById('le-mensaje').textContent = 'Credenciales incorrectas';
+        document.getElementById('le-mensaje').classList.remove('hidden');
+    }
 }
 
 function goToDashboard() {
@@ -413,8 +431,14 @@ async function respS(id) {
 
 async function toggleM() {
     const sets = await API.get('settings');
-    const maint = sets.find(s => s.clave === 'maintenance_mode')?.valor === 'true';
-    await API.patch('settings', 's3', { valor: !maint ? 'true' : 'false' });
+    const maintSetting = sets.find(s => s.clave === 'maintenance_mode');
+    const maint = maintSetting?.valor === 'true';
+    
+    if (maintSetting) {
+        await API.patch('settings', maintSetting.id, { valor: !maint ? 'true' : 'false' });
+    } else {
+        await API.post('settings', { id: 's_maintenance', clave: 'maintenance_mode', valor: 'true' });
+    }
     render();
 }
 
@@ -669,6 +693,23 @@ async function buscarBio() {
 function navE(view) { state.data.view = view; render(); }
 
 // ============================================
+// MANTENIMIENTO
+// ============================================
+function renderMantenimiento() {
+    return `<div class="min-h-screen bg-gradient-to-br from-slate-800 to-slate-900 flex items-center justify-center p-4">
+        <div class="text-center text-white">
+            <div class="text-8xl mb-8">🔧</div>
+            <h1 class="text-4xl font-black mb-4">Estamos solucionando problemas en la plataforma</h1>
+            <p class="text-xl text-slate-400 mb-8">Disculpe los inconvenientes</p>
+            <p class="text-slate-500">Pronto volveremos a funcionar</p>
+            <div class="mt-8">
+                <button onclick="logout()" class="bg-slate-700 text-white px-6 py-3 rounded-xl font-bold hover:bg-slate-600">Cerrar Sesión</button>
+            </div>
+        </div>
+    </div>`;
+}
+
+// ============================================
 // MAIN RENDER
 // ============================================
 async function render() {
@@ -683,6 +724,7 @@ async function render() {
     else if (view === 'admin') app.innerHTML = await renderAdmin();
     else if (view === 'docente') app.innerHTML = await renderDocente();
     else if (view === 'estudiante') app.innerHTML = await renderEstudiante();
+    else if (view === 'mantenimiento') app.innerHTML = renderMantenimiento();
     
     initScrollObserver();
 }
